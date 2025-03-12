@@ -150,7 +150,7 @@ def main(config_path):
     
     with accelerator.main_process_first():
         if config.get('pretrained_model', '') != '':
-            model, optimizer, start_epoch, iters = load_checkpoint_hf(model,  optimizer, config['pretrained_model'],
+            model, optimizer, start_epoch, iters, poch_iters = load_checkpoint_hf(model,  optimizer, config['pretrained_model'],
                                         load_only_params=config.get('load_only_params', True))
         else:
             start_epoch = 0
@@ -178,7 +178,7 @@ def main(config_path):
         _ = [model[key].train() for key in model]
 
         for i, batch in enumerate(train_dataloader):
-            if i+1 <= iters:
+            if i <= poch_iters:
                 continue
 
             waves = batch[0]
@@ -309,15 +309,16 @@ def main(config_path):
                 # optimizer.step('pitch_extractor')
             
             iters = iters + 1
-            
+            loss_test = 0
+
             if (i+1)%log_interval == 0 and accelerator.is_main_process:
-                if (i+1) % 1000 == 0:
+                if (i+1) % 400 == 0:
                     print('Saving..')
                     state = {
                         'net':  {key: model[key].state_dict() for key in model}, 
                         'optimizer': optimizer.state_dict(),
                         'iters': iters,
-                        'val_loss': loss_test / iters_test,
+                        'poch_iters': i,
                         'epoch': epoch - 1,
                     }
                     save_path = osp.join(log_dir, 'epoch_1st_%05d.pth' % epoch)
@@ -337,8 +338,6 @@ def main(config_path):
                 
                 print('Time elasped:', time.time()-start_time)
                                 
-        loss_test = 0
-
         _ = [model[key].eval() for key in model]
 
         with torch.no_grad():

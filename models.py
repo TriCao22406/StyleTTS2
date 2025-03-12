@@ -727,12 +727,13 @@ def load_checkpoint_hf(model, optimizer, path, load_only_params=True, ignore_mod
     if not load_only_params:
         epoch = state["epoch"]
         iters = state["iters"]
+        poch_iters = state["poch_iters"] if "poch_iters" in state else 0
         optimizer.load_state_dict(state["optimizer"])
     else:
         epoch = 0
         iters = 0
         
-    return model, optimizer, epoch, iters
+    return model, optimizer, epoch, iters, poch_iters
 
 def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, ignore_modules=[]):
     # Load first model state (kokoro)
