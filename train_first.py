@@ -178,6 +178,9 @@ def main(config_path):
         _ = [model[key].train() for key in model]
 
         for i, batch in enumerate(train_dataloader):
+            if i+1 <= iters:
+                continue
+
             waves = batch[0]
             batch = [b.to(device) for b in batch[1:]]
             texts, input_lengths, _, _, mels, mel_input_length, _ = batch
@@ -303,11 +306,23 @@ def main(config_path):
             
             if epoch >= TMA_epoch: 
                 optimizer.step('text_aligner')
-                optimizer.step('pitch_extractor')
+                # optimizer.step('pitch_extractor')
             
             iters = iters + 1
             
             if (i+1)%log_interval == 0 and accelerator.is_main_process:
+                if (i+1) % 1000 == 0:
+                    print('Saving..')
+                    state = {
+                        'net':  {key: model[key].state_dict() for key in model}, 
+                        'optimizer': optimizer.state_dict(),
+                        'iters': iters,
+                        'val_loss': loss_test / iters_test,
+                        'epoch': epoch - 1,
+                    }
+                    save_path = osp.join(log_dir, 'epoch_1st_%05d.pth' % epoch)
+                    torch.save(state, save_path)
+
                 log_print ('Epoch [%d/%d], Step [%d/%d], Mel Loss: %.5f, Gen Loss: %.5f, Disc Loss: %.5f, Mono Loss: %.5f, S2S Loss: %.5f, SLM Loss: %.5f'
                         %(epoch+1, epochs, i+1, len(train_list)//batch_size, running_loss / log_interval, loss_gen_all, d_loss, loss_mono, loss_s2s, loss_slm), logger)
                 
