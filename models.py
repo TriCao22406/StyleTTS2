@@ -15,9 +15,9 @@ from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 from Utils.ASR.models import ASRCNN
 from Utils.JDC.model import JDCNet
 
-from Modules.diffusion.sampler import KDiffusion, LogNormalDistribution
-from Modules.diffusion.modules import Transformer1d, StyleTransformer1d
-from Modules.diffusion.diffusion import AudioDiffusionConditional
+# from Modules.diffusion.sampler import KDiffusion, LogNormalDistribution
+# from Modules.diffusion.modules import Transformer1d, StyleTransformer1d
+# from Modules.diffusion.diffusion import AudioDiffusionConditional
 
 from Modules.discriminators import MultiPeriodDiscriminator, MultiResSpecDiscriminator, WavLMDiscriminator
 
@@ -601,7 +601,7 @@ def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG):
 
     def _load_model(model_config, model_path):
         model = ASRCNN(**model_config)
-        params = torch.load(model_path, map_location='cpu')['model']
+        params = torch.load(model_path, map_location='cpu', weights_only=False)['model']
         model.load_state_dict(params)
         return model
 
@@ -640,33 +640,33 @@ def build_model(args, text_aligner, pitch_extractor, bert):
     predictor_encoder = StyleEncoder(dim_in=args.dim_in, style_dim=args.style_dim, max_conv_dim=args.hidden_dim) # prosodic style encoder
         
     # define diffusion model
-    if args.multispeaker:
-        transformer = StyleTransformer1d(channels=args.style_dim*2, 
-                                    context_embedding_features=bert.config.hidden_size,
-                                    context_features=args.style_dim*2, 
-                                    **args.diffusion.transformer)
-    else:
-        transformer = Transformer1d(channels=args.style_dim*2, 
-                                    context_embedding_features=bert.config.hidden_size,
-                                    **args.diffusion.transformer)
+    # if args.multispeaker:
+    #     transformer = StyleTransformer1d(channels=args.style_dim*2, 
+    #                                 context_embedding_features=bert.config.hidden_size,
+    #                                 context_features=args.style_dim*2, 
+    #                                 **args.diffusion.transformer)
+    # else:
+    #     transformer = Transformer1d(channels=args.style_dim*2, 
+    #                                 context_embedding_features=bert.config.hidden_size,
+    #                                 **args.diffusion.transformer)
     
-    diffusion = AudioDiffusionConditional(
-        in_channels=1,
-        embedding_max_length=bert.config.max_position_embeddings,
-        embedding_features=bert.config.hidden_size,
-        embedding_mask_proba=args.diffusion.embedding_mask_proba, # Conditional dropout of batch elements,
-        channels=args.style_dim*2,
-        context_features=args.style_dim*2,
-    )
+    # diffusion = AudioDiffusionConditional(
+    #     in_channels=1,
+    #     embedding_max_length=bert.config.max_position_embeddings,
+    #     embedding_features=bert.config.hidden_size,
+    #     embedding_mask_proba=args.diffusion.embedding_mask_proba, # Conditional dropout of batch elements,
+    #     channels=args.style_dim*2,
+    #     context_features=args.style_dim*2,
+    # )
     
-    diffusion.diffusion = KDiffusion(
-        net=diffusion.unet,
-        sigma_distribution=LogNormalDistribution(mean = args.diffusion.dist.mean, std = args.diffusion.dist.std),
-        sigma_data=args.diffusion.dist.sigma_data, # a placeholder, will be changed dynamically when start training diffusion model
-        dynamic_threshold=0.0 
-    )
-    diffusion.diffusion.net = transformer
-    diffusion.unet = transformer
+    # diffusion.diffusion = KDiffusion(
+    #     net=diffusion.unet,
+    #     sigma_distribution=LogNormalDistribution(mean = args.diffusion.dist.mean, std = args.diffusion.dist.std),
+    #     sigma_data=args.diffusion.dist.sigma_data, # a placeholder, will be changed dynamically when start training diffusion model
+    #     dynamic_threshold=0.0 
+    # )
+    # diffusion.diffusion.net = transformer
+    # diffusion.unet = transformer
 
     
     nets = Munch(
@@ -679,7 +679,7 @@ def build_model(args, text_aligner, pitch_extractor, bert):
 
             predictor_encoder=predictor_encoder,
             style_encoder=style_encoder,
-            diffusion=diffusion,
+            # diffusion=diffusion,
 
             text_aligner = text_aligner,
             pitch_extractor=pitch_extractor,
@@ -687,7 +687,7 @@ def build_model(args, text_aligner, pitch_extractor, bert):
             mpd = MultiPeriodDiscriminator(),
             msd = MultiResSpecDiscriminator(),
         
-            # slm discriminator head
+            # # slm discriminator head
             wd = WavLMDiscriminator(args.slm.hidden, args.slm.nlayers, args.slm.initial_channel),
        )
     
@@ -710,4 +710,78 @@ def load_checkpoint(model, optimizer, path, load_only_params=True, ignore_module
         epoch = 0
         iters = 0
         
+    return model, optimizer, epoch, iters
+
+def load_checkpoint_hf(model, optimizer, path, load_only_params=True, ignore_modules=[]):
+    from huggingface_hub import hf_hub_download
+    model_path = hf_hub_download(repo_id="SirAB/styletts2_ljspeech_finetune", filename=path)
+
+    state = torch.load(model_path, map_location='cpu')
+    params = state['net']
+    for key in model:
+        if key in params and key not in ignore_modules:
+            print('%s loaded' % key)
+            model[key].load_state_dict(params[key], strict=False)
+    _ = [model[key].eval() for key in model]
+    
+    if not load_only_params:
+        epoch = state["epoch"]
+        iters = state["iters"]
+        optimizer.load_state_dict(state["optimizer"])
+    else:
+        epoch = 0
+        iters = 0
+        
+    return model, optimizer, epoch, iters
+
+def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, ignore_modules=[]):
+    # Load first model state (kokoro)
+    from huggingface_hub import hf_hub_download
+    kokoro_model = hf_hub_download(repo_id="hexgrad/Kokoro-82M", filename="kokoro-v1_0.pth")
+    state1 = torch.load(kokoro_model, map_location='cpu')
+    params1 = state1
+
+    # Load second model state (styletts2 checkpoint)
+    state2 = torch.load(path2, map_location='cpu')
+    params2 = state2['net']
+    
+    # Track which modules were loaded from the first model
+    loaded_modules = []
+    
+    # First load from model 1
+    for key in model:
+        if key in params1 and key not in ignore_modules:
+            print(f'{key} loaded from first model')
+            model[key].load_state_dict(params1[key], strict=False)
+            loaded_modules.append(key)
+    
+    # Then load missing modules from model 2
+    for key in model:
+        if key in params2 and key not in ignore_modules and key not in loaded_modules:
+            print(f'{key} loaded from second model')
+            model[key].load_state_dict(params2[key], strict=False)
+            loaded_modules.append(key)
+    
+    # Set all modules to eval mode
+    _ = [model[key].eval() for key in model]
+    
+    # Handle optimizer and training state
+    if not load_only_params:
+        # Prioritize training state from first model
+        epoch = state2.get("epoch", 0)
+        iters = state2.get("iters", 0)
+        if "optimizer" in state1:
+            optimizer.load_state_dict(state1["optimizer"])
+        elif "optimizer" in state2:
+            optimizer.load_state_dict(state2["optimizer"])
+    else:
+        epoch = 0
+        iters = 0
+    
+    # Report which modules weren't loaded at all
+    all_modules = set(model.keys()) - set(ignore_modules)
+    missing_modules = all_modules - set(loaded_modules)
+    if missing_modules:
+        print(f"Warning: The following modules were not loaded from either model: {missing_modules}")
+    
     return model, optimizer, epoch, iters

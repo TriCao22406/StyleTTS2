@@ -47,7 +47,7 @@ def main(config_path):
     if not osp.exists(log_dir): os.makedirs(log_dir, exist_ok=True)
     shutil.copy(config_path, osp.join(log_dir, osp.basename(config_path)))
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = Accelerator(project_dir=log_dir, split_batches=True, kwargs_handlers=[ddp_kwargs])    
+    accelerator = Accelerator(mixed_precision="fp16",project_dir=log_dir, split_batches=True, kwargs_handlers=[ddp_kwargs])    
     if accelerator.is_main_process:
         writer = SummaryWriter(log_dir + "/tensorboard")
 
@@ -150,7 +150,7 @@ def main(config_path):
     
     with accelerator.main_process_first():
         if config.get('pretrained_model', '') != '':
-            model, optimizer, start_epoch, iters = load_checkpoint(model,  optimizer, config['pretrained_model'],
+            model, optimizer, start_epoch, iters = load_checkpoint_hf(model,  optimizer, config['pretrained_model'],
                                         load_only_params=config.get('load_only_params', True))
         else:
             start_epoch = 0
@@ -171,7 +171,7 @@ def main(config_path):
                    sr, 
                    model_params.slm.sr).to(device)
 
-    for epoch in range(start_epoch, epochs):
+    for epoch in range(start_epoch + 1, epochs):
         running_loss = 0
         start_time = time.time()
 

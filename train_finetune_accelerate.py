@@ -32,7 +32,7 @@ from optimizers import build_optimizer
 
 from accelerate import Accelerator
 
-accelerator = Accelerator()
+accelerator = Accelerator(mixed_precision="fp16")  # or "bf16" for BFloat16)
 
 # simple fix for dataparallel that allows access to class attributes
 class MyDataParallel(torch.nn.DataParallel):
@@ -136,7 +136,7 @@ def main(config_path):
     for key in model:
         if key != "mpd" and key != "msd" and key != "wd":
             model[key] = MyDataParallel(model[key])
-            
+
     start_epoch = 0
     iters = 0
 
@@ -172,19 +172,21 @@ def main(config_path):
     dl = MyDataParallel(dl)
     wl = MyDataParallel(wl)
     
-    sampler = DiffusionSampler(
-        model.diffusion.diffusion,
-        sampler=ADPM2Sampler(),
-        sigma_schedule=KarrasSchedule(sigma_min=0.0001, sigma_max=3.0, rho=9.0), # empirical parameters
-        clamp=False
-    )
-    
+    # sampler = DiffusionSampler(
+    #     model.diffusion.diffusion,
+    #     sampler=ADPM2Sampler(),
+    #     sigma_schedule=KarrasSchedule(sigma_min=0.0001, sigma_max=3.0, rho=9.0), # empirical parameters
+    #     clamp=False
+    # )
+    sampler = None
+
     scheduler_params = {
         "max_lr": optimizer_params.lr,
         "pct_start": float(0),
         "epochs": epochs,
         "steps_per_epoch": len(train_dataloader),
     }
+    ######### LEARNING RATE SCHEDULER #########
     scheduler_params_dict= {key: scheduler_params.copy() for key in model}
     scheduler_params_dict['bert']['max_lr'] = optimizer_params.bert_lr * 2
     scheduler_params_dict['decoder']['max_lr'] = optimizer_params.ft_lr * 2
@@ -212,7 +214,7 @@ def main(config_path):
         
     # load models if there is a model
     if load_pretrained:
-        model, optimizer, start_epoch, iters = load_checkpoint(model,  optimizer, config['pretrained_model'],
+        model, optimizer, start_epoch, iters = load_checkpoint_kokoro(model,  optimizer, "Models/LibriTTS/epochs_2nd_00020.pth",
                                     load_only_params=config.get('load_only_params', True))
         
     n_down = model.text_aligner.n_down
@@ -234,17 +236,17 @@ def main(config_path):
     
     running_std = []
     
-    slmadv_params = Munch(config['slmadv_params'])
-    slmadv = SLMAdversarialLoss(model, wl, sampler, 
-                                slmadv_params.min_len, 
-                                slmadv_params.max_len,
-                                batch_percentage=slmadv_params.batch_percentage,
-                                skip_update=slmadv_params.iter, 
-                                sig=slmadv_params.sig
-                               )
+    # slmadv_params = Munch(config['slmadv_params'])
+    # slmadv = SLMAdversarialLoss(model, wl, sampler, 
+    #                             slmadv_params.min_len, 
+    #                             slmadv_params.max_len,
+    #                             batch_percentage=slmadv_params.batch_percentage,
+    #                             skip_update=slmadv_params.iter, 
+    #                             sig=slmadv_params.sig
+    #                            )
 
-    model, optimizer, train_dataloader = accelerator.prepare(
-        model, optimizer, train_dataloader
+    model, optimizer, train_dataloader, val_dataloader = accelerator.prepare(
+        model, optimizer, train_dataloader, val_dataloader
     )
 
     for epoch in range(start_epoch, epochs):
@@ -319,33 +321,33 @@ def main(config_path):
             d_en = model.bert_encoder(bert_dur).transpose(-1, -2) 
             
             # denoiser training
-            if epoch >= diff_epoch:
-                num_steps = np.random.randint(3, 5)
+            # if epoch >= diff_epoch:
+            #     num_steps = np.random.randint(3, 5)
                 
-                if model_params.diffusion.dist.estimate_sigma_data:
-                    model.diffusion.module.diffusion.sigma_data = s_trg.std(axis=-1).mean().item() # batch-wise std estimation
-                    running_std.append(model.diffusion.module.diffusion.sigma_data)
+            #     if model_params.diffusion.dist.estimate_sigma_data:
+            #         model.diffusion.module.diffusion.sigma_data = s_trg.std(axis=-1).mean().item() # batch-wise std estimation
+            #         running_std.append(model.diffusion.module.diffusion.sigma_data)
                     
-                if multispeaker:
-                    s_preds = sampler(noise = torch.randn_like(s_trg).unsqueeze(1).to(device), 
-                          embedding=bert_dur,
-                          embedding_scale=1,
-                                   features=ref, # reference from the same speaker as the embedding
-                             embedding_mask_proba=0.1,
-                             num_steps=num_steps).squeeze(1)
-                    loss_diff = model.diffusion(s_trg.unsqueeze(1), embedding=bert_dur, features=ref).mean() # EDM loss
-                    loss_sty = F.l1_loss(s_preds, s_trg.detach()) # style reconstruction loss
-                else:
-                    s_preds = sampler(noise = torch.randn_like(s_trg).unsqueeze(1).to(device), 
-                          embedding=bert_dur,
-                          embedding_scale=1,
-                             embedding_mask_proba=0.1,
-                             num_steps=num_steps).squeeze(1)                    
-                    loss_diff = model.diffusion.module.diffusion(s_trg.unsqueeze(1), embedding=bert_dur).mean() # EDM loss
-                    loss_sty = F.l1_loss(s_preds, s_trg.detach()) # style reconstruction loss
-            else:
-                loss_sty = 0
-                loss_diff = 0
+            #     if multispeaker:
+            #         s_preds = sampler(noise = torch.randn_like(s_trg).unsqueeze(1).to(device), 
+            #               embedding=bert_dur,
+            #               embedding_scale=1,
+            #                        features=ref, # reference from the same speaker as the embedding
+            #                  embedding_mask_proba=0.1,
+            #                  num_steps=num_steps).squeeze(1)
+            #         loss_diff = model.diffusion(s_trg.unsqueeze(1), embedding=bert_dur, features=ref).mean() # EDM loss
+            #         loss_sty = F.l1_loss(s_preds, s_trg.detach()) # style reconstruction loss
+            #     else:
+            #         s_preds = sampler(noise = torch.randn_like(s_trg).unsqueeze(1).to(device), 
+            #               embedding=bert_dur,
+            #               embedding_scale=1,
+            #                  embedding_mask_proba=0.1,
+            #                  num_steps=num_steps).squeeze(1)                    
+            #         loss_diff = model.diffusion.module.diffusion(s_trg.unsqueeze(1), embedding=bert_dur).mean() # EDM loss
+            #         loss_sty = F.l1_loss(s_preds, s_trg.detach()) # style reconstruction loss
+            # else:
+            loss_sty = 0
+            loss_diff = 0
 
                 
             s_loss = 0
@@ -453,13 +455,12 @@ def main(config_path):
                      loss_params.lambda_ce * loss_ce + \
                      loss_params.lambda_norm * loss_norm_rec + \
                      loss_params.lambda_dur * loss_dur + \
-                     loss_params.lambda_gen * loss_gen_all + \
-                     loss_params.lambda_slm * loss_lm + \
                      loss_params.lambda_sty * loss_sty + \
                      loss_params.lambda_diff * loss_diff + \
-                    loss_params.lambda_mono * loss_mono + \
-                    loss_params.lambda_s2s * loss_s2s
-            
+                     loss_params.lambda_mono * loss_mono + \
+                     loss_params.lambda_s2s * loss_s2s + \
+                     loss_params.lambda_gen * loss_gen_all + \
+                     loss_params.lambda_slm * loss_lm
             running_loss += loss_mel.item()
             accelerator.backward(g_loss)
             if torch.isnan(g_loss):
@@ -480,71 +481,73 @@ def main(config_path):
                 optimizer.step('diffusion')
 
             d_loss_slm, loss_gen_lm = 0, 0
-            if epoch >= joint_epoch:
-                # randomly pick whether to use in-distribution text
-                if np.random.rand() < 0.5:
-                    use_ind = True
-                else:
-                    use_ind = False
 
-                if use_ind:
-                    ref_lengths = input_lengths
-                    ref_texts = texts
+            ##################### SKIP ADVERSARIAL TRAINING #####################
+            # if epoch >= joint_epoch:
+            #     # randomly pick whether to use in-distribution text
+            #     if np.random.rand() < 0.5:
+            #         use_ind = True
+            #     else:
+            #         use_ind = False
+
+            #     if use_ind:
+            #         ref_lengths = input_lengths
+            #         ref_texts = texts
                     
-                slm_out = slmadv(i, 
-                                 y_rec_gt, 
-                                 y_rec_gt_pred, 
-                                 waves, 
-                                 mel_input_length,
-                                 ref_texts, 
-                                 ref_lengths, use_ind, s_trg.detach(), ref if multispeaker else None)
+                # slm_out = slmadv(i, 
+                #                  y_rec_gt, 
+                #                  y_rec_gt_pred, 
+                #                  waves, 
+                #                  mel_input_length,
+                #                  ref_texts, 
+                #                  ref_lengths, use_ind, s_trg.detach(), ref if multispeaker else None)
 
-                if slm_out is not None:
-                    d_loss_slm, loss_gen_lm, y_pred = slm_out
+                # if slm_out is not None:
+                #     d_loss_slm, loss_gen_lm, y_pred = slm_out
 
-                    # SLM generator loss
-                    optimizer.zero_grad()
-                    accelerator.backward(loss_gen_lm)
+                #     # SLM generator loss
+                #     optimizer.zero_grad()
+                #     accelerator.backward(loss_gen_lm)
 
-                    # compute the gradient norm
-                    total_norm = {}
-                    for key in model.keys():
-                        total_norm[key] = 0
-                        parameters = [p for p in model[key].parameters() if p.grad is not None and p.requires_grad]
-                        for p in parameters:
-                            param_norm = p.grad.detach().data.norm(2)
-                            total_norm[key] += param_norm.item() ** 2
-                        total_norm[key] = total_norm[key] ** 0.5
+                #     # compute the gradient norm
+                #     total_norm = {}
+                #     for key in model.keys():
+                #         total_norm[key] = 0
+                #         parameters = [p for p in model[key].parameters() if p.grad is not None and p.requires_grad]
+                #         for p in parameters:
+                #             param_norm = p.grad.detach().data.norm(2)
+                #             total_norm[key] += param_norm.item() ** 2
+                #         total_norm[key] = total_norm[key] ** 0.5
 
-                    # gradient scaling
-                    if total_norm['predictor'] > slmadv_params.thresh:
-                        for key in model.keys():
-                            for p in model[key].parameters():
-                                if p.grad is not None:
-                                    p.grad *= (1 / total_norm['predictor'])
+                #     # gradient scaling
+                #     if total_norm['predictor'] > slmadv_params.thresh:
+                #         for key in model.keys():
+                #             for p in model[key].parameters():
+                #                 if p.grad is not None:
+                #                     p.grad *= (1 / total_norm['predictor'])
 
-                    for p in model.predictor.duration_proj.parameters():
-                        if p.grad is not None:
-                            p.grad *= slmadv_params.scale
+                #     for p in model.predictor.duration_proj.parameters():
+                #         if p.grad is not None:
+                #             p.grad *= slmadv_params.scale
 
-                    for p in model.predictor.lstm.parameters():
-                        if p.grad is not None:
-                            p.grad *= slmadv_params.scale
+                #     for p in model.predictor.lstm.parameters():
+                #         if p.grad is not None:
+                #             p.grad *= slmadv_params.scale
 
-                    for p in model.diffusion.parameters():
-                        if p.grad is not None:
-                            p.grad *= slmadv_params.scale
+                #     for p in model.diffusion.parameters():
+                #         if p.grad is not None:
+                #             p.grad *= slmadv_params.scale
                     
-                    optimizer.step('bert_encoder')
-                    optimizer.step('bert')
-                    optimizer.step('predictor')
-                    optimizer.step('diffusion')
+                #     optimizer.step('bert_encoder')
+                #     optimizer.step('bert')
+                #     optimizer.step('predictor')
+                #     optimizer.step('diffusion')
 
-                    # SLM discriminator loss
-                    if d_loss_slm != 0:
-                        optimizer.zero_grad()
-                        accelerator.backward(d_loss_slm)
-                        optimizer.step('wd')
+                #     # SLM discriminator loss
+                #     if d_loss_slm != 0:
+                #         optimizer.zero_grad()
+                #         accelerator.backward(d_loss_slm)
+                #         optimizer.step('wd')
 
             iters = iters + 1
             
