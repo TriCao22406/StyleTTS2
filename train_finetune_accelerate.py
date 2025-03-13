@@ -214,9 +214,12 @@ def main(config_path):
         
     # load models if there is a model
     if load_pretrained:
-        model, optimizer, start_epoch, iters = load_checkpoint_kokoro(model,  optimizer, "Models/LibriTTS/epochs_2nd_00020.pth",
+        model, optimizer, start_epoch, iters, poch_iters = load_checkpoint_hf(model,  optimizer, config['pretrained_model'],
                                     load_only_params=config.get('load_only_params', True))
-        
+    
+    print('Start epoch:', start_epoch)
+    print('Iters:', poch_iters)
+
     n_down = model.text_aligner.n_down
 
     best_loss = float('inf')  # best test loss
@@ -265,6 +268,9 @@ def main(config_path):
         model.mpd.train()
 
         for i, batch in enumerate(train_dataloader):
+            if i <= poch_iters:
+                continue
+
             waves = batch[0]
             batch = [b.to(device) for b in batch[1:]]
             texts, input_lengths, ref_texts, ref_lengths, mels, mel_input_length, ref_mels = batch
@@ -387,7 +393,6 @@ def main(config_path):
             p_en = torch.stack(p_en)
             gt = torch.stack(gt).detach()
             st = torch.stack(st).detach()
-            
             
             if gt.size(-1) < 80:
                 continue
@@ -552,6 +557,18 @@ def main(config_path):
             iters = iters + 1
             
             if (i+1)%log_interval == 0:
+                if (i+1) % 400 == 0:
+                    print('Saving..')
+                    state = {
+                        'net':  {key: model[key].state_dict() for key in model}, 
+                        'optimizer': optimizer.state_dict(),
+                        'iters': iters,
+                        'poch_iters': i,
+                        'epoch': epoch - 1,
+                    }
+                    save_path = osp.join(log_dir, 'epoch_1st_%05d.pth' % epoch)
+                    torch.save(state, save_path)
+
                 logger.info ('Epoch [%d/%d], Step [%d/%d], Loss: %.5f, Disc Loss: %.5f, Dur Loss: %.5f, CE Loss: %.5f, Norm Loss: %.5f, F0 Loss: %.5f, LM Loss: %.5f, Gen Loss: %.5f, Sty Loss: %.5f, Diff Loss: %.5f, DiscLM Loss: %.5f, GenLM Loss: %.5f, SLoss: %.5f, S2S Loss: %.5f, Mono Loss: %.5f'
                     %(epoch+1, epochs, i+1, len(train_list)//batch_size, running_loss / log_interval, d_loss, loss_dur, loss_ce, loss_norm_rec, loss_F0_rec, loss_lm, loss_gen_all, loss_sty, loss_diff, d_loss_slm, loss_gen_lm, s_loss, loss_s2s, loss_mono))
                 
