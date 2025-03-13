@@ -744,26 +744,16 @@ def load_checkpoint_hf(model, optimizer, path, load_only_params=True, ignore_mod
                 model[key].load_state_dict(new_state_dict, strict=True)
     _ = [model[key].eval() for key in model]
 
-    print(type(model.style_encoder.shared[0]))
-
-    print('params weight:')
-    print(params['style_encoder']['shared.0.weight_orig'][0])
-    print('model weight:')
-    print(model.style_encoder.shared[0].weight[0], model.style_encoder.shared[0].weight[0].device)
-    print('params bias:')
-    print(params['style_encoder']['shared.0.bias'][0])
-    print('model bias:')
-    print(model.style_encoder.shared[0].bias[0], model.style_encoder.shared[0].bias[0].device)
-
     if not load_only_params:
         epoch = state["epoch"]
         iters = state["iters"]
         optimizer.load_state_dict(state["optimizer"])
+        poch_iters = state["epoch_iters"] if "epoch_iters" in state else 0
     else:
         epoch = 0
         iters = 0
 
-    return model, optimizer, epoch, iters
+    return model, optimizer, epoch, iters, poch_iters
 
 def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, ignore_modules=[]):
     # Load first model state (kokoro)
