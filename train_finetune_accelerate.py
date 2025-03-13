@@ -216,8 +216,9 @@ def main(config_path):
     if load_pretrained:
         model, optimizer, start_epoch, iters, poch_iters = load_checkpoint_hf(model,  optimizer, config['pretrained_model'],
                                     load_only_params=config.get('load_only_params', True),
-                                    ignore_modules=['predictor_encoder'])
-        model.predictor_encoder = copy.deepcopy(model.style_encoder)
+                                    # ignore_modules=['predictor_encoder']
+                                    )
+        # model.predictor_encoder = copy.deepcopy(model.style_encoder)
     
     print('Start epoch:', start_epoch)
     print('Iters:', poch_iters)
