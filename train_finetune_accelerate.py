@@ -254,7 +254,7 @@ def main(config_path):
         model, optimizer, train_dataloader, val_dataloader
     )
 
-    for epoch in range(start_epoch, epochs):
+    for epoch in range(start_epoch + 1, epochs):
         running_loss = 0
         start_time = time.time()
 
@@ -566,7 +566,7 @@ def main(config_path):
                         'optimizer': optimizer.state_dict(),
                         'iters': iters,
                         'poch_iters': i,
-                        'epoch': epoch - 1,
+                        'epoch': epoch,
                     }
                     save_path = osp.join(log_dir, 'epoch_1st_%05d.pth' % epoch)
                     torch.save(state, save_path)
