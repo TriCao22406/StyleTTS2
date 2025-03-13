@@ -748,7 +748,7 @@ def load_checkpoint_hf(model, optimizer, path, load_only_params=True, ignore_mod
         epoch = state["epoch"]
         iters = state["iters"]
         optimizer.load_state_dict(state["optimizer"])
-        poch_iters = state["epoch_iters"] if "epoch_iters" in state else 0
+        poch_iters = state["poch_iters"] if "poch_iters" in state else 0
     else:
         epoch = 0
         iters = 0
