@@ -684,8 +684,8 @@ def build_model(args, text_aligner, pitch_extractor, bert):
             text_aligner = text_aligner,
             pitch_extractor=pitch_extractor,
 
-            mpd = MultiPeriodDiscriminator(),
-            msd = MultiResSpecDiscriminator(),
+            # mpd = MultiPeriodDiscriminator(),
+            # msd = MultiResSpecDiscriminator(),
         
             # # slm discriminator head
             wd = WavLMDiscriminator(args.slm.hidden, args.slm.nlayers, args.slm.initial_channel),

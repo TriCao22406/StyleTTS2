@@ -161,15 +161,15 @@ def main(config_path):
         else:
             raise ValueError('You need to specify the path to the first stage model.') 
 
-    gl = GeneratorLoss(model.mpd, model.msd).to(device)
-    dl = DiscriminatorLoss(model.mpd, model.msd).to(device)
+    # gl = GeneratorLoss(model.mpd, model.msd).to(device)
+    # dl = DiscriminatorLoss(model.mpd, model.msd).to(device)
     wl = WavLMLoss(model_params.slm.model, 
                    model.wd, 
                    sr, 
                    model_params.slm.sr).to(device)
 
-    gl = MyDataParallel(gl)
-    dl = MyDataParallel(dl)
+    # gl = MyDataParallel(gl)
+    # dl = MyDataParallel(dl)
     wl = MyDataParallel(wl)
     
     # sampler = DiffusionSampler(
@@ -267,8 +267,8 @@ def main(config_path):
         model.predictor.train()
         model.bert_encoder.train()
         model.bert.train()
-        model.msd.train()
-        model.mpd.train()
+        # model.msd.train()
+        # model.mpd.train()
 
         for i, batch in enumerate(train_dataloader):
             if i <= poch_iters:
@@ -422,16 +422,16 @@ def main(config_path):
             loss_norm_rec = F.smooth_l1_loss(N_real, N_fake)
 
             optimizer.zero_grad()
-            d_loss = dl(wav.detach(), y_rec.detach()).mean()
-            accelerator.backward(d_loss)
-            optimizer.step('msd')
-            optimizer.step('mpd')
+            # d_loss = dl(wav.detach(), y_rec.detach()).mean()
+            # accelerator.backward(d_loss)
+            # optimizer.step('msd')
+            # optimizer.step('mpd')
 
             # generator loss
             optimizer.zero_grad()
 
             loss_mel = stft_loss(y_rec, wav)
-            loss_gen_all = gl(wav, y_rec).mean()
+            # loss_gen_all = gl(wav, y_rec).mean()
             loss_lm = wl(wav.detach().squeeze(), y_rec.squeeze()).mean()
 
             loss_ce = 0
@@ -463,11 +463,8 @@ def main(config_path):
                      loss_params.lambda_ce * loss_ce + \
                      loss_params.lambda_norm * loss_norm_rec + \
                      loss_params.lambda_dur * loss_dur + \
-                     loss_params.lambda_sty * loss_sty + \
-                     loss_params.lambda_diff * loss_diff + \
                      loss_params.lambda_mono * loss_mono + \
                      loss_params.lambda_s2s * loss_s2s + \
-                     loss_params.lambda_gen * loss_gen_all + \
                      loss_params.lambda_slm * loss_lm
             running_loss += loss_mel.item()
             accelerator.backward(g_loss)
@@ -572,12 +569,12 @@ def main(config_path):
                     save_path = osp.join(log_dir, 'epoch_1st_%05d.pth' % epoch)
                     torch.save(state, save_path)
 
-                logger.info ('Epoch [%d/%d], Step [%d/%d], Loss: %.5f, Disc Loss: %.5f, Dur Loss: %.5f, CE Loss: %.5f, Norm Loss: %.5f, F0 Loss: %.5f, LM Loss: %.5f, Gen Loss: %.5f, Sty Loss: %.5f, Diff Loss: %.5f, DiscLM Loss: %.5f, GenLM Loss: %.5f, SLoss: %.5f, S2S Loss: %.5f, Mono Loss: %.5f'
-                    %(epoch+1, epochs, i+1, len(train_list)//batch_size, running_loss / log_interval, d_loss, loss_dur, loss_ce, loss_norm_rec, loss_F0_rec, loss_lm, loss_gen_all, loss_sty, loss_diff, d_loss_slm, loss_gen_lm, s_loss, loss_s2s, loss_mono))
+                logger.info ('Epoch [%d/%d], Step [%d/%d], Loss: %.5f, Dur Loss: %.5f, CE Loss: %.5f, Norm Loss: %.5f, F0 Loss: %.5f, LM Loss: %.5f, S2S Loss: %.5f, Mono Loss: %.5f'
+                    %(epoch+1, epochs, i+1, len(train_list)//batch_size, running_loss / log_interval, loss_dur, loss_ce, loss_norm_rec, loss_F0_rec, loss_lm, loss_s2s, loss_mono))
                 
                 writer.add_scalar('train/mel_loss', running_loss / log_interval, iters)#Lmel
-                writer.add_scalar('train/gen_loss', loss_gen_all, iters)
-                writer.add_scalar('train/d_loss', d_loss, iters)
+                # writer.add_scalar('train/gen_loss', loss_gen_all, iters)
+                # writer.add_scalar('train/d_loss', d_loss, iters)
                 writer.add_scalar('train/ce_loss', loss_ce, iters) #Lce cross-entropy
                 writer.add_scalar('train/dur_loss', loss_dur, iters) #Ldur
                 writer.add_scalar('train/slm_loss', loss_lm, iters) #Lslm 
