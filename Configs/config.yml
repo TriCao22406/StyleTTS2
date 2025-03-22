@@ -5,8 +5,8 @@ log_interval: 10
 device: "cuda"
 epochs_1st: 20 # number of epochs for first stage training (pre-training)
 epochs_2nd: 100 # number of peochs for second stage training (joint training)
-batch_size: 2
-max_len: 440 # maximum number of frames
+batch_size: 4
+max_len: 600 # maximum number of frames
 pretrained_model: "epoch_1st_00000.pth"
 second_stage_load_pretrained: false # set to true if the pre-trained model is for 2nd stage
 load_only_params: false # set to true if do not want to load epoch numbers and optimizer parameters

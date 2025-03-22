@@ -764,8 +764,9 @@ def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, igno
     params1 = state1
 
     # Load second model state (styletts2 checkpoint)
-    state2 = torch.load(path2, map_location='cpu')
-    params2 = state2['net']
+    styletts_model = hf_hub_download(repo_id="yl4579/StyleTTS2-LibriTTS", filename="Models/LibriTTS/epochs_2nd_00020.pth")
+    state2 = torch.load(styletts_model, map_location='cpu')
+    # params2 = state2['net']
     
     # Track which modules were loaded from the first model
     loaded_modules = []
@@ -774,16 +775,49 @@ def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, igno
     for key in model:
         if key in params1 and key not in ignore_modules:
             print(f'{key} loaded from first model')
-            model[key].load_state_dict(params1[key], strict=False)
-            loaded_modules.append(key)
-    
+            try:
+                model[key].load_state_dict(params1[key])
+                loaded_modules.append(key)
+            except:
+                from collections import OrderedDict
+                state_dict = params1[key]
+                new_state_dict = OrderedDict()
+                for k, v in state_dict.items():
+                    # print(k)
+                    name = k[7:] # remove `module.`
+                    new_state_dict[name] = v
+                # load params
+                model[key].load_state_dict(new_state_dict, strict=False)
+                loaded_modules.append(key)
+
     # Then load missing modules from model 2
     for key in model:
         if key in params2 and key not in ignore_modules and key not in loaded_modules:
             print(f'{key} loaded from second model')
-            model[key].load_state_dict(params2[key], strict=False)
-            loaded_modules.append(key)
-    
+            try:
+                model[key].load_state_dict(params2[key])
+                loaded_modules.append(key)
+            except:
+                from collections import OrderedDict
+                state_dict = params2[key]
+                new_state_dict = OrderedDict()
+                for k, v in state_dict.items():
+                    # print(k)
+                    name = k[7:] # remove `module.`
+                    new_state_dict[name] = v
+                # load params
+                model[key].load_state_dict(new_state_dict, strict=False)
+                loaded_modules.append(key)
+
+    print('params weight:')
+    print(params1['decoder']['module.decode.0.conv1.weight_g'][0])
+    print('model weight:')
+    print(model.decoder.decode[0].conv1.weight_g[0], model.decode.decode[0].conv1.weight_g[0].device)
+    print('params bias:')
+    print(params1['decoder']['module.decode.0.conv1.bias'][0])
+    print('model bias:')
+    print(model.decoder.decode[0].conv1.bias[0], model.decoder.decode[0].conv1.bias[0].device)
+
     # Set all modules to eval mode
     _ = [model[key].eval() for key in model]
     
@@ -796,9 +830,11 @@ def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, igno
             optimizer.load_state_dict(state1["optimizer"])
         elif "optimizer" in state2:
             optimizer.load_state_dict(state2["optimizer"])
+        poch_iters = state2.get("poch_iters", 0)
     else:
         epoch = 0
         iters = 0
+        poch_iters = 0
     
     # Report which modules weren't loaded at all
     all_modules = set(model.keys()) - set(ignore_modules)
@@ -806,4 +842,4 @@ def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, igno
     if missing_modules:
         print(f"Warning: The following modules were not loaded from either model: {missing_modules}")
     
-    return model, optimizer, epoch, iters
+    return model, optimizer, epoch, iters, poch_iters
