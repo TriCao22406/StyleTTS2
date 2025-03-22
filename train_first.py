@@ -316,7 +316,7 @@ def main(config_path):
             loss_test = 0
 
             if (i+1)%log_interval == 0 and accelerator.is_main_process:
-                if (i+1) % 400 == 0:
+                if (i+1) % 2000 == 0:
                     print('Saving..')
                     state = {
                         'net':  {key: model[key].state_dict() for key in model}, 
