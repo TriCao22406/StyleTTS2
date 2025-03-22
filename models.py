@@ -684,8 +684,8 @@ def build_model(args, text_aligner, pitch_extractor, bert):
             text_aligner = text_aligner,
             pitch_extractor=pitch_extractor,
 
-            # mpd = MultiPeriodDiscriminator(),
-            # msd = MultiResSpecDiscriminator(),
+            mpd = MultiPeriodDiscriminator(),
+            msd = MultiResSpecDiscriminator(),
         
             # # slm discriminator head
             wd = WavLMDiscriminator(args.slm.hidden, args.slm.nlayers, args.slm.initial_channel),
@@ -766,7 +766,7 @@ def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, igno
     # Load second model state (styletts2 checkpoint)
     styletts_model = hf_hub_download(repo_id="yl4579/StyleTTS2-LibriTTS", filename="Models/LibriTTS/epochs_2nd_00020.pth")
     state2 = torch.load(styletts_model, map_location='cpu')
-    # params2 = state2['net']
+    params2 = state2
     
     # Track which modules were loaded from the first model
     loaded_modules = []
