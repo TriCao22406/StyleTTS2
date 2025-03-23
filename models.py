@@ -714,6 +714,7 @@ def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG, adapt_vocab=True):
             # Load the filtered parameters
             model.load_state_dict(filtered_params, strict=False)
             print("ASR model loaded with compatible parameters only")
+            print("-------------------------------")
             
         except Exception as e:
             print(f"Error during final model loading: {e}")
@@ -914,103 +915,120 @@ def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, igno
     # Track which modules were loaded from the first model
     loaded_modules = []
     
-    # Special handling for embedding layer with different dimensions
-    if adapt_embedding and 'text_encoder' in model and 'text_encoder' in params1:
-        # Get original embedding dimensions
-        original_embed_params = None
-        original_n_symbols = None
-        
-        if 'module.embedding.weight' in params1['text_encoder']:
-            original_embed_params = params1['text_encoder']['module.embedding.weight']
-            original_n_symbols = original_embed_params.size(0)
-        elif 'embedding.weight' in params1['text_encoder']:
-            original_embed_params = params1['text_encoder']['embedding.weight']
-            original_n_symbols = original_embed_params.size(0)
-            
-        # Get current embedding dimensions
-        current_n_symbols = model['text_encoder'].embedding.weight.size(0)
-        
-        if original_embed_params is not None and original_n_symbols != current_n_symbols:
-            print(f"Adapting embedding layer from size {original_n_symbols} to {current_n_symbols}")
-            
-            # Create a modified state dict for text_encoder with adapted embedding
-            modified_text_encoder_dict = {}
-            
-            for k, v in params1['text_encoder'].items():
-                if 'embedding.weight' in k or 'module.embedding.weight' in k:
-                    # Create new embedding tensor with expanded size
-                    embed_dim = original_embed_params.size(1)
-                    new_embedding = torch.zeros(current_n_symbols, embed_dim, device=original_embed_params.device)
-                    
-                    # Copy original weights to the first part of the new tensor
-                    new_embedding[:original_n_symbols] = original_embed_params
-                    
-                    # Initialize new embeddings (for the added symbols)
-                    with torch.no_grad():
-                        # Use similar initialization as the original embeddings
-                        if original_n_symbols > 0:
-                            mean = original_embed_params.mean()
-                            std = original_embed_params.std()
-                            torch.nn.init.normal_(new_embedding[original_n_symbols:], mean=mean, std=std)
-                    
-                    # Add to modified state dict
-                    modified_text_encoder_dict[k] = new_embedding
-                else:
-                    # Keep other parameters as they are
-                    modified_text_encoder_dict[k] = v
-                    
-            # Replace the text_encoder parameters
-            params1['text_encoder'] = modified_text_encoder_dict
+    # Get dimensions information for adaptation
+    original_n_symbols = 178  # From error message
+    current_n_symbols = 185   # From error message
     
+    # Function to adapt embedding dimensions
+    def adapt_tensor_dimensions(tensor, is_embedding=True):
+        if tensor.dim() == 2 and tensor.size(0) == original_n_symbols:
+            # This is likely an embedding or projection weight
+            embed_dim = tensor.size(1)
+            new_tensor = torch.zeros(current_n_symbols, embed_dim, device=tensor.device)
+            
+            # Copy original weights
+            new_tensor[:original_n_symbols] = tensor
+            
+            # Initialize new embeddings (for the added symbols)
+            with torch.no_grad():
+                mean = tensor.mean()
+                std = tensor.std()
+                torch.nn.init.normal_(new_tensor[original_n_symbols:], mean=mean, std=std)
+                
+            return new_tensor
+        elif tensor.dim() == 1 and tensor.size(0) == original_n_symbols:
+            # This is likely a bias vector
+            new_tensor = torch.zeros(current_n_symbols, device=tensor.device)
+            
+            # Copy original weights
+            new_tensor[:original_n_symbols] = tensor
+            
+            # Initialize new biases
+            with torch.no_grad():
+                mean = tensor.mean()
+                std = tensor.std()
+                torch.nn.init.normal_(new_tensor[original_n_symbols:], mean=mean, std=std)
+                
+            return new_tensor
+        else:
+            # No dimension adaptation needed
+            return tensor
+
+    # Function to process state dict for a module
+    def process_state_dict(state_dict, adapt_dims=True):
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        
+        for k, v in state_dict.items():
+            # Remove 'module.' prefix if present
+            name = k[7:] if k.startswith('module.') else k
+            
+            if adapt_dims and any(emb_key in name for emb_key in [
+                'embedding.weight', 
+                'word_embeddings.weight',
+                'linear_layer.weight',
+                'linear_layer.bias',
+                'project_to_n_symbols.weight',
+                'project_to_n_symbols.bias'
+            ]):
+                new_state_dict[name] = adapt_tensor_dimensions(v)
+            else:
+                new_state_dict[name] = v
+                
+        return new_state_dict
+
     # First load from model 1
     for key in model:
         if key in params1 and key not in ignore_modules:
             try:
-                model[key].load_state_dict(params1[key])
-                loaded_modules.append(key)
-                print(f'{key} loaded loaded from first model')
-            except Exception as e:
-                from collections import OrderedDict
-                state_dict = params1[key]
-                new_state_dict = OrderedDict()
-                for k, v in state_dict.items():
-                    # print(k)
-                    name = k[7:] if k.startswith('module.') else k  # remove `module.` if present
-                    new_state_dict[name] = v
-                # load params
-                try:
-                    model[key].load_state_dict(new_state_dict, strict=False)
+                # Special handling for modules that need dimension adaptation
+                if key in ['text_encoder', 'bert'] and adapt_embedding:
+                    state_dict = process_state_dict(params1[key], adapt_dims=True)
+                    model[key].load_state_dict(state_dict, strict=False)
                     loaded_modules.append(key)
-                    print(f'{key} loaded loaded from first model with strict=False')
+                    print(f'{key} loaded from first model with dimension adaptation')
+                else:
+                    model[key].load_state_dict(params1[key])
+                    loaded_modules.append(key)
+                    print(f'{key} loaded from first model')
+            except Exception as e:
+                try:
+                    state_dict = process_state_dict(params1[key], adapt_dims=(key in ['text_encoder', 'bert'] and adapt_embedding))
+                    model[key].load_state_dict(state_dict, strict=False)
+                    loaded_modules.append(key)
+                    print(f'{key} loaded from first model with strict=False')
                 except Exception as e2:
-                    print(f"Still failed to load {key}: {e2}")
+                    print(f"Failed to load {key} from first model: {e2}")
 
     # Then load missing modules from model 2
     for key in model:
         if key in params2 and key not in ignore_modules and key not in loaded_modules:
             try:
-                model[key].load_state_dict(params2[key])
-                loaded_modules.append(key)
-                print(f'{key} loaded from second model')
+                # Special handling for text_aligner which needs dimension adaptation
+                if key == 'text_aligner' and adapt_embedding:
+                    state_dict = process_state_dict(params2[key], adapt_dims=True)
+                    model[key].load_state_dict(state_dict, strict=False)
+                    loaded_modules.append(key)
+                    print(f'{key} loaded from second model with dimension adaptation')
+                else:
+                    model[key].load_state_dict(params2[key])
+                    loaded_modules.append(key)
+                    print(f'{key} loaded from second model')
             except Exception as e:
-                from collections import OrderedDict
-                state_dict = params2[key]
-                new_state_dict = OrderedDict()
-                for k, v in state_dict.items():
-                    # print(k)
-                    name = k[7:] if k.startswith('module.') else k  # remove `module.` if present
-                    new_state_dict[name] = v
-                # load params
                 try:
-                    model[key].load_state_dict(new_state_dict, strict=False)
+                    state_dict = process_state_dict(params2[key], adapt_dims=(key == 'text_aligner' and adapt_embedding))
+                    model[key].load_state_dict(state_dict, strict=False)
                     loaded_modules.append(key)
                     print(f'{key} loaded from second model with strict=False')
                 except Exception as e2:
-                    print(f"Still failed to load {key}: {e2}")
+                    print(f"Failed to load {key} from second model: {e2}")
+
+    print("---------------------------")
 
     # Validation checks
     if 'decoder' in model and 'decoder' in params1:
         try:
+            print('DECODER VALIDATION:')
             print('params weight:')
             print(params1['decoder']['module.decode.0.conv1.weight_g'][0])
             print('model weight:')
@@ -1020,7 +1038,105 @@ def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, igno
             print('model bias:')
             print(model['decoder'].decode[0].conv1.bias[0], model['decoder'].decode[0].conv1.bias[0].device)
         except Exception as e:
-            print(f"Could not print validation weights: {e}")
+            print(f"Could not print decoder validation weights: {e}")
+    print("---------------------------")
+
+    # Validation for bert module
+    if 'bert' in model and 'bert' in params1:
+        try:
+            print('\nBERT VALIDATION:')
+            # Check for word embeddings - validate dimension adaptation worked
+            original_embed = None
+            if 'module.embeddings.word_embeddings.weight' in params1['bert']:
+                original_embed = params1['bert']['module.embeddings.word_embeddings.weight']
+            elif 'embeddings.word_embeddings.weight' in params1['bert']:
+                original_embed = params1['bert']['embeddings.word_embeddings.weight']
+            
+            if original_embed is not None:
+                print('Original embedding shape:', original_embed.shape)
+                print('Original embedding second row:', original_embed[1][:5])  # First 5 values
+                print('Original embedding last row:', original_embed[-1][:5])  # First 5 values
+                
+                # Check model's current embedding
+                current_embed = model['bert'].embeddings.word_embeddings.weight
+                print('Current embedding shape:', current_embed.shape)
+                print('Current embedding second row:', current_embed[1][:5])  # First 5 values
+                print('Current embedding last row before change:', current_embed[-8][:5])  # First 5 values
+                
+                # Check newly added embeddings
+                if current_embed.shape[0] > original_embed.shape[0]:
+                    print(f'Added embeddings (checking row {original_embed.shape[0]}):', 
+                          current_embed[original_embed.shape[0]-1][:5])
+        except Exception as e:
+            print(f"Could not print bert validation weights: {e}")
+    print("---------------------------")
+
+    # Validation for text_aligner module
+    if 'text_aligner' in model and 'text_aligner' in params2:
+        try:
+            print('\nTEXT_ALIGNER VALIDATION:')
+            # Check for CTC linear layer
+            original_weight = None
+            if 'module.ctc_linear.2.linear_layer.weight' in params2['text_aligner']:
+                original_weight = params2['text_aligner']['module.ctc_linear.2.linear_layer.weight']
+            elif 'ctc_linear.2.linear_layer.weight' in params2['text_aligner']:
+                original_weight = params2['text_aligner']['ctc_linear.2.linear_layer.weight']
+            
+            if original_weight is not None:
+                print('Original CTC linear weight shape:', original_weight.shape)
+                print('Original CTC first row:', original_weight[0][:5])  # First 5 values
+                print('Original CTC last row:', original_weight[-1][:5])  # First 5 values
+                
+                # Check model's current CTC weight
+                current_weight = model['text_aligner'].ctc_linear[2].linear_layer.weight
+                print('Current CTC weight shape:', current_weight.shape)
+                print('Current CTC first row:', current_weight[0][:5])  # First 5 values
+                print('Current CTC last row:', current_weight[-8][:5])  # First 5 values
+                
+                # Check embedding layer too
+                if hasattr(model['text_aligner'], 'asr_s2s') and hasattr(model['text_aligner'].asr_s2s, 'embedding'):
+                    print('\nText aligner embedding validation:')
+                    current_embed = model['text_aligner'].asr_s2s.embedding.weight
+                    print('Current embedding shape:', current_embed.shape)
+                    
+                    # Also check project_to_n_symbols
+                    if hasattr(model['text_aligner'].asr_s2s, 'project_to_n_symbols'):
+                        print('\nText aligner projection validation:')
+                        current_proj = model['text_aligner'].asr_s2s.project_to_n_symbols.weight
+                        print('Current projection shape:', current_proj.shape)
+        except Exception as e:
+            print(f"Could not print text_aligner validation weights: {e}")
+    print("---------------------------")
+
+    # Validation for text_encoder module 
+    if 'text_encoder' in model and 'text_encoder' in params1:
+        try:
+            print('\nTEXT_ENCODER VALIDATION:')
+            original_embed = None
+            if 'module.embedding.weight' in params1['text_encoder']:
+                original_embed = params1['text_encoder']['module.embedding.weight']
+            elif 'embedding.weight' in params1['text_encoder']:
+                original_embed = params1['text_encoder']['embedding.weight']
+            
+            if original_embed is not None:
+                print('Original embedding shape:', original_embed.shape)
+                print('Original embedding first row:', original_embed[0][:5])  # First 5 values
+                print('Original embedding last row:', original_embed[-1][:5])  # First 5 values
+
+                # Check model's current embedding
+                current_embed = model['text_encoder'].embedding.weight
+                print('Current embedding shape:', current_embed.shape)
+                print('Current embedding first row:', current_embed[0][:5])  # First 5 values
+                print('Current embedding last row before:', current_embed[-8][:5])  # First 5 values
+
+                
+                # Check newly added embeddings
+                if current_embed.shape[0] > original_embed.shape[0]:
+                    print(f'Added embeddings (checking row {original_embed.shape[0]}):', 
+                          current_embed[original_embed.shape[0]-1][:5])
+        except Exception as e:
+            print(f"Could not print text_encoder validation weights: {e}")
+    print("---------------------------")
 
     # Set all modules to eval mode
     _ = [model[key].eval() for key in model]

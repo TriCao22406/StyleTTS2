@@ -109,6 +109,7 @@ def load_plbert(log_dir, adapt_embedding=True):
             print(f"Warning: Unexpected keys when loading PLBERT: {unexpected}")
             
         print(f"Successfully loaded PLBERT model from checkpoint at iteration {latest_iter}")
+        print('--------------------------------')
     except Exception as e:
         print(f"Error loading PLBERT model: {e}")
     
