@@ -18,9 +18,10 @@ class TextCleaner:
         print(len(dicts))
     def __call__(self, text):
         indexes = []
+        print(text)
         for char in text:
             try:
                 indexes.append(self.word_index_dictionary[char])
             except KeyError:
-                print(text)
+                print(char)
         return indexes

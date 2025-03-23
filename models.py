@@ -591,7 +591,7 @@ def load_F0_models(path):
     
     return F0_model
 
-def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG):
+def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG, adapt_vocab=True):
     # load ASR model
     def _load_config(path):
         with open(path) as f:
@@ -599,15 +599,134 @@ def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG):
         model_config = config['model_params']
         return model_config
 
-    def _load_model(model_config, model_path):
+def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG, adapt_vocab=True):
+    # load ASR model
+    def _load_config(path):
+        with open(path) as f:
+            config = yaml.safe_load(f)
+        model_config = config['model_params']
+        return model_config
+
+    def _load_model(model_config, model_path, adapt_vocab=True):
+        # Load saved parameters first
+        checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+        saved_params = checkpoint['model']
+        
+        # Extract original vocabulary size from checkpoint
+        original_n_symbols = None
+        for key in saved_params:
+            if 'embedding.weight' in key:
+                original_n_symbols = saved_params[key].size(0)
+                break
+        
+        # Either adapt the model config or proceed with adaptation later
+        if not adapt_vocab and original_n_symbols is not None:
+            # Force the model to use the same vocabulary size as the checkpoint
+            if 'n_symbols' in model_config:
+                print(f"Setting vocabulary size in model config to {original_n_symbols}")
+                model_config['n_symbols'] = original_n_symbols
+        
+        # Create model with configuration
         model = ASRCNN(**model_config)
-        params = torch.load(model_path, map_location='cpu', weights_only=False)['model']
-        model.load_state_dict(params)
+        
+        # Get current vocabulary size from model
+        current_n_symbols = None
+        for key, param in model.state_dict().items():
+            if 'embedding.weight' in key:
+                current_n_symbols = param.size(0)
+                break
+        
+        if adapt_vocab and original_n_symbols != current_n_symbols:
+            print(f"Model vocabulary size: {current_n_symbols}")
+            print(f"Checkpoint vocabulary size: {original_n_symbols}")
+            
+            # Directly modify problematic parameters in the state dict
+            for key in list(saved_params.keys()):
+                # Skip parameters that aren't vocabulary-dependent
+                if not any(pattern in key for pattern in [
+                    'embedding.weight',
+                    'project_to_n_symbols',
+                    'ctc_linear.2.linear_layer'
+                ]):
+                    continue
+                
+                param = saved_params[key]
+                if param.dim() == 2:
+                    # Handle 2D parameters (weight matrices)
+                    if key.endswith('.weight'):
+                        if param.size(0) == original_n_symbols:
+                            # Output dimension (like projection layers)
+                            print(f"Adapting output dimension of {key} from {param.size(0)} to {current_n_symbols}")
+                            new_param = torch.zeros((current_n_symbols, param.size(1)), 
+                                                   device=param.device, dtype=param.dtype)
+                            # Copy existing weights
+                            min_size = min(original_n_symbols, current_n_symbols)
+                            new_param[:min_size] = param[:min_size]
+                            # Initialize new weights if vocabulary expanded
+                            if current_n_symbols > original_n_symbols:
+                                # Use normal initialization for the new rows
+                                torch.nn.init.normal_(new_param[original_n_symbols:], mean=0, std=0.02)
+                            saved_params[key] = new_param
+                        
+                        elif param.size(1) == original_n_symbols:
+                            # Input dimension
+                            print(f"Adapting input dimension of {key} from {param.size(1)} to {current_n_symbols}")
+                            new_param = torch.zeros((param.size(0), current_n_symbols), 
+                                                   device=param.device, dtype=param.dtype)
+                            # Copy existing weights
+                            min_size = min(original_n_symbols, current_n_symbols)
+                            new_param[:, :min_size] = param[:, :min_size]
+                            # Initialize new weights if vocabulary expanded
+                            if current_n_symbols > original_n_symbols:
+                                # Use normal initialization for the new columns
+                                torch.nn.init.normal_(new_param[:, original_n_symbols:], mean=0, std=0.02)
+                            saved_params[key] = new_param
+                
+                elif param.dim() == 1:
+                    # Handle 1D parameters (bias vectors)
+                    if param.size(0) == original_n_symbols:
+                        print(f"Adapting bias vector {key} from size {param.size(0)} to {current_n_symbols}")
+                        new_param = torch.zeros(current_n_symbols, device=param.device, dtype=param.dtype)
+                        # Copy existing biases
+                        min_size = min(original_n_symbols, current_n_symbols)
+                        new_param[:min_size] = param[:min_size]
+                        # Initialize new biases if vocabulary expanded
+                        if current_n_symbols > original_n_symbols:
+                            new_param[original_n_symbols:].fill_(0)  # Initialize new biases with zeros
+                        saved_params[key] = new_param
+        
+        # Try to load the state dict
+        try:
+            # First try with filtered dict - only include parameters that match in size
+            model_dict = model.state_dict()
+            filtered_params = {k: v for k, v in saved_params.items() 
+                              if k in model_dict and v.size() == model_dict[k].size()}
+            
+            # Check if we've missed any important parameters
+            missing_params = [k for k in model_dict.keys() 
+                             if k in saved_params and k not in filtered_params]
+            if missing_params:
+                print(f"Warning: The following parameters couldn't be loaded due to size mismatch:")
+                for param in missing_params:
+                    if param in saved_params:
+                        print(f"  {param}: model shape {model_dict[param].size()} vs checkpoint shape {saved_params[param].size()}")
+            
+            # Load the filtered parameters
+            model.load_state_dict(filtered_params, strict=False)
+            print("ASR model loaded with compatible parameters only")
+            
+        except Exception as e:
+            print(f"Error during final model loading: {e}")
+            print("Model initialization failed. Please check your model configuration.")
+            return None
+        
         return model
 
+    # Load config and model
     asr_model_config = _load_config(ASR_MODEL_CONFIG)
-    asr_model = _load_model(asr_model_config, ASR_MODEL_PATH)
-    _ = asr_model.train()
+    asr_model = _load_model(asr_model_config, ASR_MODEL_PATH, adapt_vocab)
+    if asr_model is not None:
+        _ = asr_model.train()
 
     return asr_model
 

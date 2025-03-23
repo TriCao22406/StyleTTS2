@@ -42,7 +42,7 @@ model_params:
   n_layer: 3
   n_mels: 80
 
-  n_token: 184 # number of phoneme tokens
+  n_token: 185 # number of phoneme tokens
   max_dur: 50 # maximum duration of a single phoneme
   style_dim: 128 # style vector size
   

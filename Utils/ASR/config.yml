@@ -22,7 +22,7 @@ preprocess_parasm:
 model_params:
    input_dim: 80
    hidden_dim: 256
-   n_token: 178
+   n_token: 185
    token_embedding_dim: 512
 
 optimizer_params:
