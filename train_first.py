@@ -306,7 +306,7 @@ def main(config_path):
             
             optimizer.step('text_encoder')
             optimizer.step('style_encoder')
-            optimizer.step('decoder')
+            # optimizer.step('decoder')
             
             if epoch >= TMA_epoch: 
                 optimizer.step('text_aligner')
@@ -316,7 +316,7 @@ def main(config_path):
             loss_test = 0
 
             if (i+1)%log_interval == 0 and accelerator.is_main_process:
-                if (i+1) % 2000 == 0:
+                if (i+1) % 500 == 0:
                     print('Saving..')
                     state = {
                         'net':  {key: model[key].state_dict() for key in model}, 
@@ -329,7 +329,7 @@ def main(config_path):
                     torch.save(state, save_path)
 
                 log_print ('Epoch [%d/%d], Step [%d/%d], Mel Loss: %.5f, Gen Loss: %.5f, Disc Loss: %.5f, Mono Loss: %.5f, S2S Loss: %.5f, SLM Loss: %.5f'
-                        %(epoch+1, epochs, i+1, len(train_list)//batch_size, running_loss / log_interval, loss_gen_all, d_loss, loss_mono, loss_s2s, loss_slm), logger)
+                        %(epoch, epochs, i+1, len(train_list)//batch_size, running_loss / log_interval, loss_gen_all, d_loss, loss_mono, loss_s2s, loss_slm), logger)
                 
                 writer.add_scalar('train/mel_loss', running_loss / log_interval, iters)
                 writer.add_scalar('train/gen_loss', loss_gen_all, iters)

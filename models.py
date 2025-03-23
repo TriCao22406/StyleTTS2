@@ -706,25 +706,38 @@ def load_checkpoint(model, optimizer, path, load_only_params=True, ignore_module
                 from collections import OrderedDict
                 state_dict = params[key]
                 new_state_dict = OrderedDict()
-                print(f'{key} key length: {len(model[key].state_dict().keys())}, state_dict length: {len(state_dict.keys())}')
-                for (k_m, v_m), (k_c, v_c) in zip(model[key].state_dict().items(), state_dict.items()):
-                    new_state_dict[k_m] = v_c
-                model[key].load_state_dict(new_state_dict, strict=True)
+                for k, v in state_dict.items():
+                    # print(k)
+                    name = k[7:] # remove `module.`
+                    new_state_dict[name] = v
+                # load params
+                model[key].load_state_dict(new_state_dict, strict=False)
     _ = [model[key].eval() for key in model]
+
+    print('params weight:')
+    print(params['decoder']['decode.0.conv1.weight_g'][0])
+    print('model weight:')
+    print(model.decoder.decode[0].conv1.weight_g[0], model.decoder.decode[0].conv1.weight_g[0].device)
+    print('params bias:')
+    print(params['decoder']['decode.0.conv1.bias'][0])
+    print('model bias:')
+    print(model.decoder.decode[0].conv1.bias[0], model.decoder.decode[0].conv1.bias[0].device)
 
     if not load_only_params:
         epoch = state["epoch"]
         iters = state["iters"]
         optimizer.load_state_dict(state["optimizer"])
+        poch_iters = state["poch_iters"] if "poch_iters" in state else 0
     else:
         epoch = 0
         iters = 0
+        poch_iters = 0
 
-    return model, optimizer, epoch, iters
+    return model, optimizer, epoch, iters, poch_iters
 
 def load_checkpoint_hf(model, optimizer, path, load_only_params=True, ignore_modules=[]):
     from huggingface_hub import hf_hub_download
-    model_path = hf_hub_download(repo_id="SirAB/styletts2_ljspeech_finetune", filename=path)
+    model_path = hf_hub_download(repo_id="SirAB/kokoro_finetune", filename=path)
 
     state = torch.load(model_path, map_location='cpu')
     params = state['net']
@@ -738,11 +751,22 @@ def load_checkpoint_hf(model, optimizer, path, load_only_params=True, ignore_mod
                 from collections import OrderedDict
                 state_dict = params[key]
                 new_state_dict = OrderedDict()
-                print(f'{key} key length: {len(model[key].state_dict().keys())}, state_dict length: {len(state_dict.keys())}')
-                for (k_m, v_m), (k_c, v_c) in zip(model[key].state_dict().items(), state_dict.items()):
-                    new_state_dict[k_m] = v_c
-                model[key].load_state_dict(new_state_dict, strict=True)
+                for k, v in state_dict.items():
+                    # print(k)
+                    name = k[7:] # remove `module.`
+                    new_state_dict[name] = v
+                # load params
+                model[key].load_state_dict(new_state_dict, strict=False)
     _ = [model[key].eval() for key in model]
+
+    print('params weight:')
+    print(params['decoder']['decode.0.conv1.weight_g'][0])
+    print('model weight:')
+    print(model.decoder.decode[0].conv1.weight_g[0], model.decoder.decode[0].conv1.weight_g[0].device)
+    print('params bias:')
+    print(params['decoder']['decode.0.conv1.bias'][0])
+    print('model bias:')
+    print(model.decoder.decode[0].conv1.bias[0], model.decoder.decode[0].conv1.bias[0].device)
 
     if not load_only_params:
         epoch = state["epoch"]
@@ -756,7 +780,7 @@ def load_checkpoint_hf(model, optimizer, path, load_only_params=True, ignore_mod
 
     return model, optimizer, epoch, iters, poch_iters
 
-def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, ignore_modules=[]):
+def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, ignore_modules=[], adapt_embedding=True):
     # Load first model state (kokoro)
     from huggingface_hub import hf_hub_download
     kokoro_model = hf_hub_download(repo_id="hexgrad/Kokoro-82M", filename="kokoro-v1_0.pth")
@@ -766,57 +790,118 @@ def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, igno
     # Load second model state (styletts2 checkpoint)
     styletts_model = hf_hub_download(repo_id="yl4579/StyleTTS2-LibriTTS", filename="Models/LibriTTS/epochs_2nd_00020.pth")
     state2 = torch.load(styletts_model, map_location='cpu')
-    params2 = state2
+    params2 = state2['net']
     
     # Track which modules were loaded from the first model
     loaded_modules = []
     
+    # Special handling for embedding layer with different dimensions
+    if adapt_embedding and 'text_encoder' in model and 'text_encoder' in params1:
+        # Get original embedding dimensions
+        original_embed_params = None
+        original_n_symbols = None
+        
+        if 'module.embedding.weight' in params1['text_encoder']:
+            original_embed_params = params1['text_encoder']['module.embedding.weight']
+            original_n_symbols = original_embed_params.size(0)
+        elif 'embedding.weight' in params1['text_encoder']:
+            original_embed_params = params1['text_encoder']['embedding.weight']
+            original_n_symbols = original_embed_params.size(0)
+            
+        # Get current embedding dimensions
+        current_n_symbols = model['text_encoder'].embedding.weight.size(0)
+        
+        if original_embed_params is not None and original_n_symbols != current_n_symbols:
+            print(f"Adapting embedding layer from size {original_n_symbols} to {current_n_symbols}")
+            
+            # Create a modified state dict for text_encoder with adapted embedding
+            modified_text_encoder_dict = {}
+            
+            for k, v in params1['text_encoder'].items():
+                if 'embedding.weight' in k or 'module.embedding.weight' in k:
+                    # Create new embedding tensor with expanded size
+                    embed_dim = original_embed_params.size(1)
+                    new_embedding = torch.zeros(current_n_symbols, embed_dim, device=original_embed_params.device)
+                    
+                    # Copy original weights to the first part of the new tensor
+                    new_embedding[:original_n_symbols] = original_embed_params
+                    
+                    # Initialize new embeddings (for the added symbols)
+                    with torch.no_grad():
+                        # Use similar initialization as the original embeddings
+                        if original_n_symbols > 0:
+                            mean = original_embed_params.mean()
+                            std = original_embed_params.std()
+                            torch.nn.init.normal_(new_embedding[original_n_symbols:], mean=mean, std=std)
+                    
+                    # Add to modified state dict
+                    modified_text_encoder_dict[k] = new_embedding
+                else:
+                    # Keep other parameters as they are
+                    modified_text_encoder_dict[k] = v
+                    
+            # Replace the text_encoder parameters
+            params1['text_encoder'] = modified_text_encoder_dict
+    
     # First load from model 1
     for key in model:
         if key in params1 and key not in ignore_modules:
-            print(f'{key} loaded from first model')
             try:
                 model[key].load_state_dict(params1[key])
                 loaded_modules.append(key)
-            except:
+                print(f'{key} loaded loaded from first model')
+            except Exception as e:
                 from collections import OrderedDict
                 state_dict = params1[key]
                 new_state_dict = OrderedDict()
                 for k, v in state_dict.items():
                     # print(k)
-                    name = k[7:] # remove `module.`
+                    name = k[7:] if k.startswith('module.') else k  # remove `module.` if present
                     new_state_dict[name] = v
                 # load params
-                model[key].load_state_dict(new_state_dict, strict=False)
-                loaded_modules.append(key)
+                try:
+                    model[key].load_state_dict(new_state_dict, strict=False)
+                    loaded_modules.append(key)
+                    print(f'{key} loaded loaded from first model with strict=False')
+                except Exception as e2:
+                    print(f"Still failed to load {key}: {e2}")
 
     # Then load missing modules from model 2
     for key in model:
         if key in params2 and key not in ignore_modules and key not in loaded_modules:
-            print(f'{key} loaded from second model')
             try:
                 model[key].load_state_dict(params2[key])
                 loaded_modules.append(key)
-            except:
+                print(f'{key} loaded from second model')
+            except Exception as e:
                 from collections import OrderedDict
                 state_dict = params2[key]
                 new_state_dict = OrderedDict()
                 for k, v in state_dict.items():
                     # print(k)
-                    name = k[7:] # remove `module.`
+                    name = k[7:] if k.startswith('module.') else k  # remove `module.` if present
                     new_state_dict[name] = v
                 # load params
-                model[key].load_state_dict(new_state_dict, strict=False)
-                loaded_modules.append(key)
+                try:
+                    model[key].load_state_dict(new_state_dict, strict=False)
+                    loaded_modules.append(key)
+                    print(f'{key} loaded from second model with strict=False')
+                except Exception as e2:
+                    print(f"Still failed to load {key}: {e2}")
 
-    print('params weight:')
-    print(params1['decoder']['module.decode.0.conv1.weight_g'][0])
-    print('model weight:')
-    print(model.decoder.decode[0].conv1.weight_g[0], model.decode.decode[0].conv1.weight_g[0].device)
-    print('params bias:')
-    print(params1['decoder']['module.decode.0.conv1.bias'][0])
-    print('model bias:')
-    print(model.decoder.decode[0].conv1.bias[0], model.decoder.decode[0].conv1.bias[0].device)
+    # Validation checks
+    if 'decoder' in model and 'decoder' in params1:
+        try:
+            print('params weight:')
+            print(params1['decoder']['module.decode.0.conv1.weight_g'][0])
+            print('model weight:')
+            print(model['decoder'].decode[0].conv1.weight_g[0], model['decoder'].decode[0].conv1.weight_g[0].device)
+            print('params bias:')
+            print(params1['decoder']['module.decode.0.conv1.bias'][0])
+            print('model bias:')
+            print(model['decoder'].decode[0].conv1.bias[0], model['decoder'].decode[0].conv1.bias[0].device)
+        except Exception as e:
+            print(f"Could not print validation weights: {e}")
 
     # Set all modules to eval mode
     _ = [model[key].eval() for key in model]
