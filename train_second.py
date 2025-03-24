@@ -130,9 +130,9 @@ def main(config_path):
     _ = [model[key].to(device) for key in model]
     
     # DP
-    for key in model:
-        if key != "mpd" and key != "msd" and key != "wd":
-            model[key] = MyDataParallel(model[key])
+    # for key in model:
+    #     if key != "mpd" and key != "msd" and key != "wd":
+    #         model[key] = MyDataParallel(model[key])
             
     start_epoch = 0
     iters = 0
@@ -165,9 +165,9 @@ def main(config_path):
                    sr, 
                    model_params.slm.sr).to(device)
 
-    gl = MyDataParallel(gl)
-    dl = MyDataParallel(dl)
-    wl = MyDataParallel(wl)
+    # gl = MyDataParallel(gl)
+    # dl = MyDataParallel(dl)
+    # wl = MyDataParallel(wl)
     
     # sampler = DiffusionSampler(
     #     model.diffusion.diffusion,
@@ -209,7 +209,7 @@ def main(config_path):
         
     # load models if there is a model
     if load_pretrained:
-        model, optimizer, start_epoch, iters = load_checkpoint(model,  optimizer, config['pretrained_model'],
+        model, optimizer, start_epoch, iters, poch_iters = load_checkpoint_hf(model,  optimizer, config['pretrained_model'],
                                     load_only_params=config.get('load_only_params', True))
         
     n_down = model.text_aligner.n_down
@@ -258,6 +258,9 @@ def main(config_path):
             start_ds = True
 
         for i, batch in enumerate(train_dataloader):
+            if i <= poch_iters:
+                continue
+
             waves = batch[0]
             batch = [b.to(device) for b in batch[1:]]
             texts, input_lengths, ref_texts, ref_lengths, mels, mel_input_length, ref_mels = batch
