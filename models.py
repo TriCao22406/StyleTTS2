@@ -815,7 +815,8 @@ def build_model(args, text_aligner, pitch_extractor, bert):
 
 def load_checkpoint(model, optimizer, path, load_only_params=True, ignore_modules=[]):
     state = torch.load(path, map_location='cpu')
-    params = state['net']
+    # params = state['net']
+    params = state
 
     for key in model:
         if key in params and key not in ignore_modules:

@@ -169,12 +169,12 @@ def main(config_path):
     dl = MyDataParallel(dl)
     wl = MyDataParallel(wl)
     
-    sampler = DiffusionSampler(
-        model.diffusion.diffusion,
-        sampler=ADPM2Sampler(),
-        sigma_schedule=KarrasSchedule(sigma_min=0.0001, sigma_max=3.0, rho=9.0), # empirical parameters
-        clamp=False
-    )
+    # sampler = DiffusionSampler(
+    #     model.diffusion.diffusion,
+    #     sampler=ADPM2Sampler(),
+    #     sigma_schedule=KarrasSchedule(sigma_min=0.0001, sigma_max=3.0, rho=9.0), # empirical parameters
+    #     clamp=False
+    # )
     
     scheduler_params = {
         "max_lr": optimizer_params.lr,
@@ -232,13 +232,13 @@ def main(config_path):
     running_std = []
     
     slmadv_params = Munch(config['slmadv_params'])
-    slmadv = SLMAdversarialLoss(model, wl, sampler, 
-                                slmadv_params.min_len, 
-                                slmadv_params.max_len,
-                                batch_percentage=slmadv_params.batch_percentage,
-                                skip_update=slmadv_params.iter, 
-                                sig=slmadv_params.sig
-                               )
+    # slmadv = SLMAdversarialLoss(model, wl, sampler, 
+    #                             slmadv_params.min_len, 
+    #                             slmadv_params.max_len,
+    #                             batch_percentage=slmadv_params.batch_percentage,
+    #                             skip_update=slmadv_params.iter, 
+    #                             sig=slmadv_params.sig
+                            #    )
 
 
     for epoch in range(start_epoch, epochs):
@@ -310,33 +310,33 @@ def main(config_path):
             d_en = model.bert_encoder(bert_dur).transpose(-1, -2) 
             
             # denoiser training
-            if epoch >= diff_epoch:
-                num_steps = np.random.randint(3, 5)
+            # if epoch >= diff_epoch:
+            #     num_steps = np.random.randint(3, 5)
                 
-                if model_params.diffusion.dist.estimate_sigma_data:
-                    model.diffusion.module.diffusion.sigma_data = s_trg.std(axis=-1).mean().item() # batch-wise std estimation
-                    running_std.append(model.diffusion.module.diffusion.sigma_data)
+            #     if model_params.diffusion.dist.estimate_sigma_data:
+            #         model.diffusion.module.diffusion.sigma_data = s_trg.std(axis=-1).mean().item() # batch-wise std estimation
+            #         running_std.append(model.diffusion.module.diffusion.sigma_data)
                     
-                if multispeaker:
-                    s_preds = sampler(noise = torch.randn_like(s_trg).unsqueeze(1).to(device), 
-                          embedding=bert_dur,
-                          embedding_scale=1,
-                                   features=ref, # reference from the same speaker as the embedding
-                             embedding_mask_proba=0.1,
-                             num_steps=num_steps).squeeze(1)
-                    loss_diff = model.diffusion(s_trg.unsqueeze(1), embedding=bert_dur, features=ref).mean() # EDM loss
-                    loss_sty = F.l1_loss(s_preds, s_trg.detach()) # style reconstruction loss
-                else:
-                    s_preds = sampler(noise = torch.randn_like(s_trg).unsqueeze(1).to(device), 
-                          embedding=bert_dur,
-                          embedding_scale=1,
-                             embedding_mask_proba=0.1,
-                             num_steps=num_steps).squeeze(1)                    
-                    loss_diff = model.diffusion.module.diffusion(s_trg.unsqueeze(1), embedding=bert_dur).mean() # EDM loss
-                    loss_sty = F.l1_loss(s_preds, s_trg.detach()) # style reconstruction loss
-            else:
-                loss_sty = 0
-                loss_diff = 0
+            #     if multispeaker:
+            #         s_preds = sampler(noise = torch.randn_like(s_trg).unsqueeze(1).to(device), 
+            #               embedding=bert_dur,
+            #               embedding_scale=1,
+            #                        features=ref, # reference from the same speaker as the embedding
+            #                  embedding_mask_proba=0.1,
+            #                  num_steps=num_steps).squeeze(1)
+            #         loss_diff = model.diffusion(s_trg.unsqueeze(1), embedding=bert_dur, features=ref).mean() # EDM loss
+            #         loss_sty = F.l1_loss(s_preds, s_trg.detach()) # style reconstruction loss
+            #     else:
+            #         s_preds = sampler(noise = torch.randn_like(s_trg).unsqueeze(1).to(device), 
+            #               embedding=bert_dur,
+            #               embedding_scale=1,
+            #                  embedding_mask_proba=0.1,
+            #                  num_steps=num_steps).squeeze(1)                    
+            #         loss_diff = model.diffusion.module.diffusion(s_trg.unsqueeze(1), embedding=bert_dur).mean() # EDM loss
+            #         loss_sty = F.l1_loss(s_preds, s_trg.detach()) # style reconstruction loss
+            # else:
+            loss_sty = 0
+            loss_diff = 0
 
             d, p = model.predictor(d_en, s_dur, 
                                                     input_lengths, 
@@ -461,79 +461,81 @@ def main(config_path):
             optimizer.step('predictor')
             optimizer.step('predictor_encoder')
             
-            if epoch >= diff_epoch:
-                optimizer.step('diffusion')
+            # if epoch >= diff_epoch:
+            #     optimizer.step('diffusion')
             
             if epoch >= joint_epoch:
                 optimizer.step('style_encoder')
                 optimizer.step('decoder')
+
+                d_loss_slm, loss_gen_lm = 0, 0
         
                 # randomly pick whether to use in-distribution text
-                if np.random.rand() < 0.5:
-                    use_ind = True
-                else:
-                    use_ind = False
+                # if np.random.rand() < 0.5:
+                #     use_ind = True
+                # else:
+                #     use_ind = False
 
-                if use_ind:
-                    ref_lengths = input_lengths
-                    ref_texts = texts
+                # if use_ind:
+                #     ref_lengths = input_lengths
+                #     ref_texts = texts
                     
-                slm_out = slmadv(i, 
-                                 y_rec_gt, 
-                                 y_rec_gt_pred, 
-                                 waves, 
-                                 mel_input_length,
-                                 ref_texts, 
-                                 ref_lengths, use_ind, s_trg.detach(), ref if multispeaker else None)
+                # slm_out = slmadv(i, 
+                #                  y_rec_gt, 
+                #                  y_rec_gt_pred, 
+                #                  waves, 
+                #                  mel_input_length,
+                #                  ref_texts, 
+                #                  ref_lengths, use_ind, s_trg.detach(), ref if multispeaker else None)
 
-                if slm_out is None:
-                    continue
+                # if slm_out is None:
+                #     continue
                     
-                d_loss_slm, loss_gen_lm, y_pred = slm_out
+                # d_loss_slm, loss_gen_lm, y_pred = slm_out
                 
-                # SLM generator loss
-                optimizer.zero_grad()
-                loss_gen_lm.backward()
+                # # SLM generator loss
+                # optimizer.zero_grad()
+                # loss_gen_lm.backward()
 
-                # compute the gradient norm
-                total_norm = {}
-                for key in model.keys():
-                    total_norm[key] = 0
-                    parameters = [p for p in model[key].parameters() if p.grad is not None and p.requires_grad]
-                    for p in parameters:
-                        param_norm = p.grad.detach().data.norm(2)
-                        total_norm[key] += param_norm.item() ** 2
-                    total_norm[key] = total_norm[key] ** 0.5
+                # # compute the gradient norm
+                # total_norm = {}
+                # for key in model.keys():
+                #     total_norm[key] = 0
+                #     parameters = [p for p in model[key].parameters() if p.grad is not None and p.requires_grad]
+                #     for p in parameters:
+                #         param_norm = p.grad.detach().data.norm(2)
+                #         total_norm[key] += param_norm.item() ** 2
+                #     total_norm[key] = total_norm[key] ** 0.5
 
-                # gradient scaling
-                if total_norm['predictor'] > slmadv_params.thresh:
-                    for key in model.keys():
-                        for p in model[key].parameters():
-                            if p.grad is not None:
-                                p.grad *= (1 / total_norm['predictor']) 
+                # # gradient scaling
+                # if total_norm['predictor'] > slmadv_params.thresh:
+                #     for key in model.keys():
+                #         for p in model[key].parameters():
+                #             if p.grad is not None:
+                #                 p.grad *= (1 / total_norm['predictor']) 
 
-                for p in model.predictor.duration_proj.parameters():
-                    if p.grad is not None:
-                        p.grad *= slmadv_params.scale
+                # for p in model.predictor.duration_proj.parameters():
+                #     if p.grad is not None:
+                #         p.grad *= slmadv_params.scale
 
-                for p in model.predictor.lstm.parameters():
-                    if p.grad is not None:
-                        p.grad *= slmadv_params.scale
+                # for p in model.predictor.lstm.parameters():
+                #     if p.grad is not None:
+                #         p.grad *= slmadv_params.scale
 
-                for p in model.diffusion.parameters():
-                    if p.grad is not None:
-                        p.grad *= slmadv_params.scale
+                # for p in model.diffusion.parameters():
+                #     if p.grad is not None:
+                #         p.grad *= slmadv_params.scale
 
-                optimizer.step('bert_encoder')
-                optimizer.step('bert')
-                optimizer.step('predictor')
-                optimizer.step('diffusion')
+                # optimizer.step('bert_encoder')
+                # optimizer.step('bert')
+                # optimizer.step('predictor')
+                # optimizer.step('diffusion')
 
-                # SLM discriminator loss
-                if d_loss_slm != 0:
-                    optimizer.zero_grad()
-                    d_loss_slm.backward(retain_graph=True)
-                    optimizer.step('wd')
+                # # SLM discriminator loss
+                # if d_loss_slm != 0:
+                #     optimizer.zero_grad()
+                #     d_loss_slm.backward(retain_graph=True)
+                #     optimizer.step('wd')
 
             else:
                 d_loss_slm, loss_gen_lm = 0, 0
@@ -541,6 +543,18 @@ def main(config_path):
             iters = iters + 1
             
             if (i+1)%log_interval == 0:
+                if (i+1) % 400 == 0:
+                    print('Saving..')
+                    state = {
+                        'net':  {key: model[key].state_dict() for key in model}, 
+                        'optimizer': optimizer.state_dict(),
+                        'iters': iters,
+                        'poch_iters': i,
+                        'epoch': epoch - 1,
+                    }
+                    save_path = osp.join(log_dir, 'epoch_2nd_%05d.pth' % epoch)
+                    torch.save(state, save_path)
+
                 logger.info ('Epoch [%d/%d], Step [%d/%d], Loss: %.5f, Disc Loss: %.5f, Dur Loss: %.5f, CE Loss: %.5f, Norm Loss: %.5f, F0 Loss: %.5f, LM Loss: %.5f, Gen Loss: %.5f, Sty Loss: %.5f, Diff Loss: %.5f, DiscLM Loss: %.5f, GenLM Loss: %.5f'
                     %(epoch+1, epochs, i+1, len(train_list)//batch_size, running_loss / log_interval, d_loss, loss_dur, loss_ce, loss_norm_rec, loss_F0_rec, loss_lm, loss_gen_all, loss_sty, loss_diff, d_loss_slm, loss_gen_lm))
                 
@@ -682,7 +696,7 @@ def main(config_path):
         writer.add_scalar('eval/dur_loss', loss_align / iters_test, epoch + 1)
         writer.add_scalar('eval/F0_loss', loss_f / iters_test, epoch + 1)
         
-        if epoch < joint_epoch:
+        if epoch < diff_epoch:
             # generating reconstruction examples with GT duration
             
             with torch.no_grad():
@@ -725,16 +739,18 @@ def main(config_path):
                     
                 for bib in range(len(d_en)):
                     if multispeaker:
-                        s_pred = sampler(noise = torch.randn((1, 256)).unsqueeze(1).to(texts.device), 
-                              embedding=bert_dur[bib].unsqueeze(0),
-                              embedding_scale=1,
-                                features=ref_s[bib].unsqueeze(0), # reference from the same speaker as the embedding
-                                 num_steps=5).squeeze(1)
+                        # s_pred = sampler(noise = torch.randn((1, 256)).unsqueeze(1).to(texts.device), 
+                        #       embedding=bert_dur[bib].unsqueeze(0),
+                        #       embedding_scale=1,
+                        #         features=ref_s[bib].unsqueeze(0), # reference from the same speaker as the embedding
+                        #          num_steps=5).squeeze(1)
+                        s_pred = ref_s
                     else:
-                        s_pred = sampler(noise = torch.randn((1, 256)).unsqueeze(1).to(texts.device), 
-                              embedding=bert_dur[bib].unsqueeze(0),
-                              embedding_scale=1,
-                                 num_steps=5).squeeze(1)
+                        # s_pred = sampler(noise = torch.randn((1, 256)).unsqueeze(1).to(texts.device), 
+                        #       embedding=bert_dur[bib].unsqueeze(0),
+                        #       embedding_scale=1,
+                        #          num_steps=5).squeeze(1)
+                        s_pred = ref_s
 
                     s = s_pred[:, 128:]
                     ref = s_pred[:, :128]
