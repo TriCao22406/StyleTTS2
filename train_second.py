@@ -377,6 +377,7 @@ def main(config_path):
             st = torch.stack(st).detach()
             
             if gt.size(-1) < 80:
+                logger.info(f"Skipping batch {batch_idx} due to insufficient length: {gt.size(-1)}")
                 continue
 
             s_dur = model.predictor_encoder(st.unsqueeze(1) if multispeaker else gt.unsqueeze(1))
@@ -583,15 +584,36 @@ def main(config_path):
         loss_f = 0
         _ = [model[key].eval() for key in model]
 
+        if epoch % saving_epoch == 0:
+            if (loss_test / iters_test) < best_loss:
+                best_loss = loss_test / iters_test
+            print('Saving..')
+            state = {
+                'net':  {key: model[key].state_dict() for key in model}, 
+                'optimizer': optimizer.state_dict(),
+                'iters': iters,
+                'val_loss': loss_test / iters_test,
+                'epoch': epoch,
+            }
+            save_path = osp.join(log_dir, 'epoch_2nd_%05d.pth' % epoch)
+            torch.save(state, save_path)
+            
+            # if estimate sigma, save the estimated simga
+            if model_params.diffusion.dist.estimate_sigma_data:
+                config['model_params']['diffusion']['dist']['sigma_data'] = float(np.mean(running_std))
+                
+                with open(osp.join(log_dir, osp.basename(config_path)), 'w') as outfile:
+                    yaml.dump(config, outfile, default_flow_style=True)
+
         with torch.no_grad():
             iters_test = 0
             for batch_idx, batch in enumerate(val_dataloader):
                 optimizer.zero_grad()
-                
                 try:
                     waves = batch[0]
                     batch = [b.to(device) for b in batch[1:]]
                     texts, input_lengths, ref_texts, ref_lengths, mels, mel_input_length, ref_mels = batch
+                    logger.info(f"Batch {batch_idx}: texts.shape={texts.shape}, mels.shape={mels.shape}, mel_input_length={mel_input_length}")
                     with torch.no_grad():
                         mask = length_to_mask(mel_input_length // (2 ** n_down)).to('cuda')
                         text_mask = length_to_mask(input_lengths).to(texts.device)
@@ -786,26 +808,7 @@ def main(config_path):
                     if bib >= 5:
                         break
                             
-        if epoch % saving_epoch == 0:
-            if (loss_test / iters_test) < best_loss:
-                best_loss = loss_test / iters_test
-            print('Saving..')
-            state = {
-                'net':  {key: model[key].state_dict() for key in model}, 
-                'optimizer': optimizer.state_dict(),
-                'iters': iters,
-                'val_loss': loss_test / iters_test,
-                'epoch': epoch,
-            }
-            save_path = osp.join(log_dir, 'epoch_2nd_%05d.pth' % epoch)
-            torch.save(state, save_path)
-            
-            # if estimate sigma, save the estimated simga
-            if model_params.diffusion.dist.estimate_sigma_data:
-                config['model_params']['diffusion']['dist']['sigma_data'] = float(np.mean(running_std))
-                
-                with open(osp.join(log_dir, osp.basename(config_path)), 'w') as outfile:
-                    yaml.dump(config, outfile, default_flow_style=True)
+
         
 if __name__=="__main__":
     main()
