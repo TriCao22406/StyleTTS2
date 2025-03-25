@@ -292,7 +292,6 @@ def main(config_path):
                 loss_params.lambda_s2s * loss_s2s + \
                 loss_params.lambda_gen * loss_gen_all + \
                 loss_params.lambda_slm * loss_slm
-
             else:
                 loss_s2s = 0
                 loss_mono = 0
@@ -308,8 +307,8 @@ def main(config_path):
             optimizer.step('style_encoder')
             # optimizer.step('decoder')
             
-            if epoch >= TMA_epoch: 
-                optimizer.step('text_aligner')
+            # if epoch >= TMA_epoch: 
+                # optimizer.step('text_aligner')
                 # optimizer.step('pitch_extractor')
             
             iters = iters + 1
