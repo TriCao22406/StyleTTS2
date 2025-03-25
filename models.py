@@ -1143,19 +1143,19 @@ def load_checkpoint_kokoro(model, optimizer, path2, load_only_params=False, igno
     _ = [model[key].eval() for key in model]
     
     # Handle optimizer and training state
-    if not load_only_params:
-        # Prioritize training state from first model
-        epoch = state2.get("epoch", 0)
-        iters = state2.get("iters", 0)
-        if "optimizer" in state1:
-            optimizer.load_state_dict(state1["optimizer"])
-        elif "optimizer" in state2:
-            optimizer.load_state_dict(state2["optimizer"])
-        poch_iters = state2.get("poch_iters", 0)
-    else:
-        epoch = 0
-        iters = 0
-        poch_iters = 0
+    # if not load_only_params:
+    #     # Prioritize training state from first model
+    #     epoch = state2.get("epoch", 0)
+    #     iters = state2.get("iters", 0)
+    #     if "optimizer" in state1:
+    #         optimizer.load_state_dict(state1["optimizer"])
+    #     elif "optimizer" in state2:
+    #         optimizer.load_state_dict(state2["optimizer"])
+    #     poch_iters = state2.get("poch_iters", 0)
+    # else:
+    epoch = 0
+    iters = 0
+    poch_iters = 0
     
     # Report which modules weren't loaded at all
     all_modules = set(model.keys()) - set(ignore_modules)
