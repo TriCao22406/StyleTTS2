@@ -463,12 +463,12 @@ def main(config_path):
             optimizer.step('bert')
             optimizer.step('predictor')
             optimizer.step('predictor_encoder')
-            
+            optimizer.step('style_encoder')
+
             # if epoch >= diff_epoch:
             #     optimizer.step('diffusion')
             
             if epoch >= joint_epoch:
-                optimizer.step('style_encoder')
                 optimizer.step('decoder')
 
                 d_loss_slm, loss_gen_lm = 0, 0
