@@ -591,13 +591,6 @@ def load_F0_models(path):
     
     return F0_model
 
-def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG, adapt_vocab=True):
-    # load ASR model
-    def _load_config(path):
-        with open(path) as f:
-            config = yaml.safe_load(f)
-        model_config = config['model_params']
-        return model_config
 
 def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG, adapt_vocab=True):
     # load ASR model
@@ -858,7 +851,7 @@ def load_checkpoint(model, optimizer, path, load_only_params=True, ignore_module
 
 def load_checkpoint_hf(model, optimizer, path, load_only_params=True, ignore_modules=[]):
     from huggingface_hub import hf_hub_download
-    model_path = hf_hub_download(repo_id="SirAB/kokoro_finetune", filename=path)
+    model_path = hf_hub_download(repo_id="SirAB/kokoro_finetune_v1", filename=path)
 
     state = torch.load(model_path, map_location='cpu')
     params = state['net']

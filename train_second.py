@@ -377,7 +377,6 @@ def main(config_path):
             st = torch.stack(st).detach()
             
             if gt.size(-1) < 80:
-                logger.info(f"Skipping batch {batch_idx} due to insufficient length: {gt.size(-1)}")
                 continue
 
             s_dur = model.predictor_encoder(st.unsqueeze(1) if multispeaker else gt.unsqueeze(1))
@@ -604,16 +603,16 @@ def main(config_path):
                 
                 with open(osp.join(log_dir, osp.basename(config_path)), 'w') as outfile:
                     yaml.dump(config, outfile, default_flow_style=True)
-
+                    
         with torch.no_grad():
             iters_test = 0
             for batch_idx, batch in enumerate(val_dataloader):
                 optimizer.zero_grad()
+                
                 try:
                     waves = batch[0]
                     batch = [b.to(device) for b in batch[1:]]
                     texts, input_lengths, ref_texts, ref_lengths, mels, mel_input_length, ref_mels = batch
-                    logger.info(f"Batch {batch_idx}: texts.shape={texts.shape}, mels.shape={mels.shape}, mel_input_length={mel_input_length}")
                     with torch.no_grad():
                         mask = length_to_mask(mel_input_length // (2 ** n_down)).to('cuda')
                         text_mask = length_to_mask(input_lengths).to(texts.device)
