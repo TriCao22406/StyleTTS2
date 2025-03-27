@@ -398,7 +398,9 @@ def main(config_path):
                     wav = y_rec_gt # use recording since decoder is tuned
                 else:
                     # ground truth from reconstruction
-                    wav = y_rec_gt_pred # use reconstruction since decoder is fixed
+                    # wav = y_rec_gt_pred # use reconstruction since decoder is fixed
+                    wav = y_rec_gt # use recording since decoder is tuned
+
 
             F0_fake, N_fake = model.predictor.F0Ntrain(p_en, s_dur)
 
@@ -459,8 +461,9 @@ def main(config_path):
                 from IPython.core.debugger import set_trace
                 set_trace()
 
-            optimizer.step('bert_encoder')
-            optimizer.step('bert')
+            optimizer.step('text_encoder')
+            # optimizer.step('bert_encoder')
+            # optimizer.step('bert')
             # optimizer.step('predictor')
             optimizer.step('predictor_encoder')
             optimizer.step('style_encoder')
