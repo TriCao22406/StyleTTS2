@@ -461,7 +461,7 @@ def main(config_path):
 
             optimizer.step('bert_encoder')
             optimizer.step('bert')
-            optimizer.step('predictor')
+            # optimizer.step('predictor')
             optimizer.step('predictor_encoder')
             optimizer.step('style_encoder')
 
