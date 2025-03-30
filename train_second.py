@@ -447,13 +447,15 @@ def main(config_path):
 
             g_loss = loss_params.lambda_mel * loss_mel + \
                      loss_params.lambda_F0 * loss_F0_rec + \
-                     loss_params.lambda_ce * loss_ce + \
                      loss_params.lambda_norm * loss_norm_rec + \
-                     loss_params.lambda_dur * loss_dur + \
                      loss_params.lambda_gen * loss_gen_all + \
                      loss_params.lambda_slm * loss_lm + \
                      loss_params.lambda_sty * loss_sty + \
                      loss_params.lambda_diff * loss_diff
+                    #  loss_params.lambda_ce * loss_ce + \
+
+                    #  loss_params.lambda_dur * loss_dur + \
+
 
             running_loss += loss_mel.item()
             g_loss.backward()
