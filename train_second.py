@@ -464,8 +464,8 @@ def main(config_path):
                 set_trace()
 
             optimizer.step('text_encoder')
-            # optimizer.step('bert_encoder')
-            # optimizer.step('bert')
+            optimizer.step('bert_encoder')
+            optimizer.step('bert')
             # optimizer.step('predictor')
             optimizer.step('predictor_encoder')
             optimizer.step('style_encoder')
