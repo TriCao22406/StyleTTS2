@@ -10,7 +10,7 @@ epochs_2nd: 100 # number of peochs for second stage training (joint training)
 # second stage 1st epoch = 2x300
 batch_size: 2
 max_len: 300 # maximum number of frames
-pretrained_model: "epoch_1st_00000.pth"
+pretrained_model: "LJSpeech/epoch_2nd_00011.pth"
 second_stage_load_pretrained: true # set to true if the pre-trained model is for 2nd stage
 load_only_params: false # set to true if do not want to load epoch numbers and optimizer parameters
 

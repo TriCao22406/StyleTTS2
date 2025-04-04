@@ -258,8 +258,8 @@ def main(config_path):
             start_ds = True
 
         for i, batch in enumerate(train_dataloader):
-            if i <= poch_iters:
-                continue
+            # if i <= poch_iters:
+            #     continue
 
             waves = batch[0]
             batch = [b.to(device) for b in batch[1:]]
@@ -451,11 +451,9 @@ def main(config_path):
                      loss_params.lambda_gen * loss_gen_all + \
                      loss_params.lambda_slm * loss_lm + \
                      loss_params.lambda_sty * loss_sty + \
-                     loss_params.lambda_diff * loss_diff
-                    #  loss_params.lambda_ce * loss_ce + \
-
-                    #  loss_params.lambda_dur * loss_dur + \
-
+                     loss_params.lambda_diff * loss_diff + \
+                     loss_params.lambda_ce * loss_ce + \
+                     loss_params.lambda_dur * loss_dur
 
             running_loss += loss_mel.item()
             g_loss.backward()
@@ -474,7 +472,7 @@ def main(config_path):
             #     optimizer.step('diffusion')
             
             if epoch >= joint_epoch:
-                optimizer.step('decoder')
+                # optimizer.step('decoder')
 
                 d_loss_slm, loss_gen_lm = 0, 0
         
@@ -551,17 +549,17 @@ def main(config_path):
             iters = iters + 1
             
             if (i+1)%log_interval == 0:
-                if (i+1) % 100 == 0:
-                    print('Saving..')
-                    state = {
-                        'net':  {key: model[key].state_dict() for key in model}, 
-                        'optimizer': optimizer.state_dict(),
-                        'iters': iters,
-                        'poch_iters': i,
-                        'epoch': epoch - 1,
-                    }
-                    save_path = osp.join(log_dir, 'epoch_2nd_%05d.pth' % epoch)
-                    torch.save(state, save_path)
+                # if (i+1) % 100 == 0:
+                #     print('Saving..')
+                #     state = {
+                #         'net':  {key: model[key].state_dict() for key in model}, 
+                #         'optimizer': optimizer.state_dict(),
+                #         'iters': iters,
+                #         'poch_iters': i,
+                #         'epoch': epoch - 1,
+                #     }
+                #     save_path = osp.join(log_dir, 'epoch_2nd_%05d.pth' % epoch)
+                #     torch.save(state, save_path)
 
                 logger.info ('Epoch [%d/%d], Step [%d/%d], Loss: %.5f, Disc Loss: %.5f, Dur Loss: %.5f, CE Loss: %.5f, Norm Loss: %.5f, F0 Loss: %.5f, LM Loss: %.5f, Gen Loss: %.5f, Sty Loss: %.5f, Diff Loss: %.5f, DiscLM Loss: %.5f, GenLM Loss: %.5f'
                     %(epoch+1, epochs, i+1, len(train_list)//batch_size, running_loss / log_interval, d_loss, loss_dur, loss_ce, loss_norm_rec, loss_F0_rec, loss_lm, loss_gen_all, loss_sty, loss_diff, d_loss_slm, loss_gen_lm))
