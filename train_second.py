@@ -551,7 +551,7 @@ def main(config_path):
             iters = iters + 1
             
             if (i+1)%log_interval == 0:
-                if (i+1) % 400 == 0:
+                if (i+1) % 100 == 0:
                     print('Saving..')
                     state = {
                         'net':  {key: model[key].state_dict() for key in model}, 
@@ -589,14 +589,11 @@ def main(config_path):
         _ = [model[key].eval() for key in model]
 
         if epoch % saving_epoch == 0:
-            if (loss_test / iters_test) < best_loss:
-                best_loss = loss_test / iters_test
             print('Saving..')
             state = {
                 'net':  {key: model[key].state_dict() for key in model}, 
                 'optimizer': optimizer.state_dict(),
                 'iters': iters,
-                'val_loss': loss_test / iters_test,
                 'epoch': epoch,
             }
             save_path = osp.join(log_dir, 'epoch_2nd_%05d.pth' % epoch)
@@ -609,208 +606,208 @@ def main(config_path):
                 with open(osp.join(log_dir, osp.basename(config_path)), 'w') as outfile:
                     yaml.dump(config, outfile, default_flow_style=True)
                     
-        with torch.no_grad():
-            iters_test = 0
-            for batch_idx, batch in enumerate(val_dataloader):
-                optimizer.zero_grad()
-                
-                try:
-                    waves = batch[0]
-                    batch = [b.to(device) for b in batch[1:]]
-                    texts, input_lengths, ref_texts, ref_lengths, mels, mel_input_length, ref_mels = batch
-                    with torch.no_grad():
-                        mask = length_to_mask(mel_input_length // (2 ** n_down)).to('cuda')
-                        text_mask = length_to_mask(input_lengths).to(texts.device)
-
-                        _, _, s2s_attn = model.text_aligner(mels, mask, texts)
-                        s2s_attn = s2s_attn.transpose(-1, -2)
-                        s2s_attn = s2s_attn[..., 1:]
-                        s2s_attn = s2s_attn.transpose(-1, -2)
-
-                        mask_ST = mask_from_lens(s2s_attn, input_lengths, mel_input_length // (2 ** n_down))
-                        s2s_attn_mono = maximum_path(s2s_attn, mask_ST)
-
-                        # encode
-                        t_en = model.text_encoder(texts, input_lengths, text_mask)
-                        asr = (t_en @ s2s_attn_mono)
-
-                        d_gt = s2s_attn_mono.sum(axis=-1).detach()
-
-                    ss = []
-                    gs = []
-
-                    for bib in range(len(mel_input_length)):
-                        mel_length = int(mel_input_length[bib].item())
-                        mel = mels[bib, :, :mel_input_length[bib]]
-                        s = model.predictor_encoder(mel.unsqueeze(0).unsqueeze(1))
-                        ss.append(s)
-                        s = model.style_encoder(mel.unsqueeze(0).unsqueeze(1))
-                        gs.append(s)
-
-                    s = torch.stack(ss).squeeze()
-                    gs = torch.stack(gs).squeeze()
-                    s_trg = torch.cat([s, gs], dim=-1).detach()
-
-                    bert_dur = model.bert(texts, attention_mask=(~text_mask).int())
-                    d_en = model.bert_encoder(bert_dur).transpose(-1, -2) 
-                    d, p = model.predictor(d_en, s, 
-                                                        input_lengths, 
-                                                        s2s_attn_mono, 
-                                                        text_mask)
-                    # get clips
-                    mel_len = int(mel_input_length.min().item() / 2 - 1)
-                    en = []
-                    gt = []
-                    p_en = []
-                    wav = []
-
-                    for bib in range(len(mel_input_length)):
-                        mel_length = int(mel_input_length[bib].item() / 2)
-
-                        random_start = np.random.randint(0, mel_length - mel_len)
-                        en.append(asr[bib, :, random_start:random_start+mel_len])
-                        p_en.append(p[bib, :, random_start:random_start+mel_len])
-
-                        gt.append(mels[bib, :, (random_start * 2):((random_start+mel_len) * 2)])
-
-                        y = waves[bib][(random_start * 2) * 300:((random_start+mel_len) * 2) * 300]
-                        wav.append(torch.from_numpy(y).to(device))
-
-                    wav = torch.stack(wav).float().detach()
-
-                    en = torch.stack(en)
-                    p_en = torch.stack(p_en)
-                    gt = torch.stack(gt).detach()
-
-                    s = model.predictor_encoder(gt.unsqueeze(1))
-
-                    F0_fake, N_fake = model.predictor.F0Ntrain(p_en, s)
-
-                    loss_dur = 0
-                    for _s2s_pred, _text_input, _text_length in zip(d, (d_gt), input_lengths):
-                        _s2s_pred = _s2s_pred[:_text_length, :]
-                        _text_input = _text_input[:_text_length].long()
-                        _s2s_trg = torch.zeros_like(_s2s_pred)
-                        for bib in range(_s2s_trg.shape[0]):
-                            _s2s_trg[bib, :_text_input[bib]] = 1
-                        _dur_pred = torch.sigmoid(_s2s_pred).sum(axis=1)
-                        loss_dur += F.l1_loss(_dur_pred[1:_text_length-1], 
-                                               _text_input[1:_text_length-1])
-
-                    loss_dur /= texts.size(0)
-
-                    s = model.style_encoder(gt.unsqueeze(1))
-
-                    y_rec = model.decoder(en, F0_fake, N_fake, s)
-                    loss_mel = stft_loss(y_rec.squeeze(), wav.detach())
-
-                    F0_real, _, F0 = model.pitch_extractor(gt.unsqueeze(1)) 
-
-                    loss_F0 = F.l1_loss(F0_real, F0_fake) / 10
-
-                    loss_test += (loss_mel).mean()
-                    loss_align += (loss_dur).mean()
-                    loss_f += (loss_F0).mean()
-
-                    iters_test += 1
-                except Exception as e:
-                    print(f"run into exception", e)
-                    traceback.print_exc()
-                    continue
-
-        print('Epochs:', epoch + 1)
-        logger.info('Validation loss: %.3f, Dur loss: %.3f, F0 loss: %.3f' % (loss_test / iters_test, loss_align / iters_test, loss_f / iters_test) + '\n\n\n')
-        print('\n\n\n')
-        writer.add_scalar('eval/mel_loss', loss_test / iters_test, epoch + 1)
-        writer.add_scalar('eval/dur_loss', loss_align / iters_test, epoch + 1)
-        writer.add_scalar('eval/F0_loss', loss_f / iters_test, epoch + 1)
-        
-        if epoch < diff_epoch:
-            # generating reconstruction examples with GT duration
+        # with torch.no_grad():
             
-            with torch.no_grad():
-                for bib in range(len(asr)):
-                    mel_length = int(mel_input_length[bib].item())
-                    gt = mels[bib, :, :mel_length].unsqueeze(0)
-                    en = asr[bib, :, :mel_length // 2].unsqueeze(0)
+        #     for batch_idx, batch in enumerate(val_dataloader):
+        #         optimizer.zero_grad()
+                
+        #         try:
+        #             waves = batch[0]
+        #             batch = [b.to(device) for b in batch[1:]]
+        #             texts, input_lengths, ref_texts, ref_lengths, mels, mel_input_length, ref_mels = batch
+        #             with torch.no_grad():
+        #                 mask = length_to_mask(mel_input_length // (2 ** n_down)).to('cuda')
+        #                 text_mask = length_to_mask(input_lengths).to(texts.device)
 
-                    F0_real, _, _ = model.pitch_extractor(gt.unsqueeze(1))
-                    F0_real = F0_real.unsqueeze(0)
-                    s = model.style_encoder(gt.unsqueeze(1))
-                    real_norm = log_norm(gt.unsqueeze(1)).squeeze(1)
+        #                 _, _, s2s_attn = model.text_aligner(mels, mask, texts)
+        #                 s2s_attn = s2s_attn.transpose(-1, -2)
+        #                 s2s_attn = s2s_attn[..., 1:]
+        #                 s2s_attn = s2s_attn.transpose(-1, -2)
 
-                    y_rec = model.decoder(en, F0_real, real_norm, s)
+        #                 mask_ST = mask_from_lens(s2s_attn, input_lengths, mel_input_length // (2 ** n_down))
+        #                 s2s_attn_mono = maximum_path(s2s_attn, mask_ST)
 
-                    writer.add_audio('eval/y' + str(bib), y_rec.cpu().numpy().squeeze(), epoch, sample_rate=sr)
+        #                 # encode
+        #                 t_en = model.text_encoder(texts, input_lengths, text_mask)
+        #                 asr = (t_en @ s2s_attn_mono)
 
-                    s_dur = model.predictor_encoder(gt.unsqueeze(1))
-                    p_en = p[bib, :, :mel_length // 2].unsqueeze(0)
+        #                 d_gt = s2s_attn_mono.sum(axis=-1).detach()
 
-                    F0_fake, N_fake = model.predictor.F0Ntrain(p_en, s_dur)
+        #             ss = []
+        #             gs = []
 
-                    y_pred = model.decoder(en, F0_fake, N_fake, s)
+        #             for bib in range(len(mel_input_length)):
+        #                 mel_length = int(mel_input_length[bib].item())
+        #                 mel = mels[bib, :, :mel_input_length[bib]]
+        #                 s = model.predictor_encoder(mel.unsqueeze(0).unsqueeze(1))
+        #                 ss.append(s)
+        #                 s = model.style_encoder(mel.unsqueeze(0).unsqueeze(1))
+        #                 gs.append(s)
 
-                    writer.add_audio('pred/y' + str(bib), y_pred.cpu().numpy().squeeze(), epoch, sample_rate=sr)
+        #             s = torch.stack(ss).squeeze()
+        #             gs = torch.stack(gs).squeeze()
+        #             s_trg = torch.cat([s, gs], dim=-1).detach()
 
-                    if epoch == 0:
-                        writer.add_audio('gt/y' + str(bib), waves[bib].squeeze(), epoch, sample_rate=sr)
+        #             bert_dur = model.bert(texts, attention_mask=(~text_mask).int())
+        #             d_en = model.bert_encoder(bert_dur).transpose(-1, -2) 
+        #             d, p = model.predictor(d_en, s, 
+        #                                                 input_lengths, 
+        #                                                 s2s_attn_mono, 
+        #                                                 text_mask)
+        #             # get clips
+        #             mel_len = int(mel_input_length.min().item() / 2 - 1)
+        #             en = []
+        #             gt = []
+        #             p_en = []
+        #             wav = []
 
-                    if bib >= 5:
-                        break
-        else:
-            # generating sampled speech from text directly
-            with torch.no_grad():
-                # compute reference styles
-                if multispeaker and epoch >= diff_epoch:
-                    ref_ss = model.style_encoder(ref_mels.unsqueeze(1))
-                    ref_sp = model.predictor_encoder(ref_mels.unsqueeze(1))
-                    ref_s = torch.cat([ref_ss, ref_sp], dim=1)
+        #             for bib in range(len(mel_input_length)):
+        #                 mel_length = int(mel_input_length[bib].item() / 2)
+
+        #                 random_start = np.random.randint(0, mel_length - mel_len)
+        #                 en.append(asr[bib, :, random_start:random_start+mel_len])
+        #                 p_en.append(p[bib, :, random_start:random_start+mel_len])
+
+        #                 gt.append(mels[bib, :, (random_start * 2):((random_start+mel_len) * 2)])
+
+        #                 y = waves[bib][(random_start * 2) * 300:((random_start+mel_len) * 2) * 300]
+        #                 wav.append(torch.from_numpy(y).to(device))
+
+        #             wav = torch.stack(wav).float().detach()
+
+        #             en = torch.stack(en)
+        #             p_en = torch.stack(p_en)
+        #             gt = torch.stack(gt).detach()
+
+        #             s = model.predictor_encoder(gt.unsqueeze(1))
+
+        #             F0_fake, N_fake = model.predictor.F0Ntrain(p_en, s)
+
+        #             loss_dur = 0
+        #             for _s2s_pred, _text_input, _text_length in zip(d, (d_gt), input_lengths):
+        #                 _s2s_pred = _s2s_pred[:_text_length, :]
+        #                 _text_input = _text_input[:_text_length].long()
+        #                 _s2s_trg = torch.zeros_like(_s2s_pred)
+        #                 for bib in range(_s2s_trg.shape[0]):
+        #                     _s2s_trg[bib, :_text_input[bib]] = 1
+        #                 _dur_pred = torch.sigmoid(_s2s_pred).sum(axis=1)
+        #                 loss_dur += F.l1_loss(_dur_pred[1:_text_length-1], 
+        #                                        _text_input[1:_text_length-1])
+
+        #             loss_dur /= texts.size(0)
+
+        #             s = model.style_encoder(gt.unsqueeze(1))
+
+        #             y_rec = model.decoder(en, F0_fake, N_fake, s)
+        #             loss_mel = stft_loss(y_rec.squeeze(), wav.detach())
+
+        #             F0_real, _, F0 = model.pitch_extractor(gt.unsqueeze(1)) 
+
+        #             loss_F0 = F.l1_loss(F0_real, F0_fake) / 10
+
+        #             loss_test += (loss_mel).mean()
+        #             loss_align += (loss_dur).mean()
+        #             loss_f += (loss_F0).mean()
+
+        #             iters_test += 1
+        #         except Exception as e:
+        #             print(f"run into exception", e)
+        #             traceback.print_exc()
+        #             continue
+
+        # print('Epochs:', epoch + 1)
+        # logger.info('Validation loss: %.3f, Dur loss: %.3f, F0 loss: %.3f' % (loss_test / iters_test, loss_align / iters_test, loss_f / iters_test) + '\n\n\n')
+        # print('\n\n\n')
+        # writer.add_scalar('eval/mel_loss', loss_test / iters_test, epoch + 1)
+        # writer.add_scalar('eval/dur_loss', loss_align / iters_test, epoch + 1)
+        # writer.add_scalar('eval/F0_loss', loss_f / iters_test, epoch + 1)
+        
+        # if epoch < diff_epoch:
+        #     # generating reconstruction examples with GT duration
+            
+        #     with torch.no_grad():
+        #         for bib in range(len(asr)):
+        #             mel_length = int(mel_input_length[bib].item())
+        #             gt = mels[bib, :, :mel_length].unsqueeze(0)
+        #             en = asr[bib, :, :mel_length // 2].unsqueeze(0)
+
+        #             F0_real, _, _ = model.pitch_extractor(gt.unsqueeze(1))
+        #             F0_real = F0_real.unsqueeze(0)
+        #             s = model.style_encoder(gt.unsqueeze(1))
+        #             real_norm = log_norm(gt.unsqueeze(1)).squeeze(1)
+
+        #             y_rec = model.decoder(en, F0_real, real_norm, s)
+
+        #             writer.add_audio('eval/y' + str(bib), y_rec.cpu().numpy().squeeze(), epoch, sample_rate=sr)
+
+        #             s_dur = model.predictor_encoder(gt.unsqueeze(1))
+        #             p_en = p[bib, :, :mel_length // 2].unsqueeze(0)
+
+        #             F0_fake, N_fake = model.predictor.F0Ntrain(p_en, s_dur)
+
+        #             y_pred = model.decoder(en, F0_fake, N_fake, s)
+
+        #             writer.add_audio('pred/y' + str(bib), y_pred.cpu().numpy().squeeze(), epoch, sample_rate=sr)
+
+        #             if epoch == 0:
+        #                 writer.add_audio('gt/y' + str(bib), waves[bib].squeeze(), epoch, sample_rate=sr)
+
+        #             if bib >= 5:
+        #                 break
+        # else:
+        #     # generating sampled speech from text directly
+        #     with torch.no_grad():
+        #         # compute reference styles
+        #         if multispeaker and epoch >= diff_epoch:
+        #             ref_ss = model.style_encoder(ref_mels.unsqueeze(1))
+        #             ref_sp = model.predictor_encoder(ref_mels.unsqueeze(1))
+        #             ref_s = torch.cat([ref_ss, ref_sp], dim=1)
                     
-                for bib in range(len(d_en)):
-                    if multispeaker:
-                        # s_pred = sampler(noise = torch.randn((1, 256)).unsqueeze(1).to(texts.device), 
-                        #       embedding=bert_dur[bib].unsqueeze(0),
-                        #       embedding_scale=1,
-                        #         features=ref_s[bib].unsqueeze(0), # reference from the same speaker as the embedding
-                        #          num_steps=5).squeeze(1)
-                        s_pred = ref_s
-                    else:
-                        # s_pred = sampler(noise = torch.randn((1, 256)).unsqueeze(1).to(texts.device), 
-                        #       embedding=bert_dur[bib].unsqueeze(0),
-                        #       embedding_scale=1,
-                        #          num_steps=5).squeeze(1)
-                        s_pred = ref_s
+        #         for bib in range(len(d_en)):
+        #             if multispeaker:
+        #                 # s_pred = sampler(noise = torch.randn((1, 256)).unsqueeze(1).to(texts.device), 
+        #                 #       embedding=bert_dur[bib].unsqueeze(0),
+        #                 #       embedding_scale=1,
+        #                 #         features=ref_s[bib].unsqueeze(0), # reference from the same speaker as the embedding
+        #                 #          num_steps=5).squeeze(1)
+        #                 s_pred = ref_s
+        #             else:
+        #                 # s_pred = sampler(noise = torch.randn((1, 256)).unsqueeze(1).to(texts.device), 
+        #                 #       embedding=bert_dur[bib].unsqueeze(0),
+        #                 #       embedding_scale=1,
+        #                 #          num_steps=5).squeeze(1)
+        #                 s_pred = ref_s
 
-                    s = s_pred[:, 128:]
-                    ref = s_pred[:, :128]
+        #             s = s_pred[:, 128:]
+        #             ref = s_pred[:, :128]
 
-                    d = model.predictor.text_encoder(d_en[bib, :, :input_lengths[bib]].unsqueeze(0), 
-                                                     s, input_lengths[bib, ...].unsqueeze(0), text_mask[bib, :input_lengths[bib]].unsqueeze(0))
+        #             d = model.predictor.text_encoder(d_en[bib, :, :input_lengths[bib]].unsqueeze(0), 
+        #                                              s, input_lengths[bib, ...].unsqueeze(0), text_mask[bib, :input_lengths[bib]].unsqueeze(0))
 
-                    x, _ = model.predictor.lstm(d)
-                    duration = model.predictor.duration_proj(x)
+        #             x, _ = model.predictor.lstm(d)
+        #             duration = model.predictor.duration_proj(x)
 
-                    duration = torch.sigmoid(duration).sum(axis=-1)
-                    pred_dur = torch.round(duration.squeeze()).clamp(min=1)
+        #             duration = torch.sigmoid(duration).sum(axis=-1)
+        #             pred_dur = torch.round(duration.squeeze()).clamp(min=1)
 
-                    pred_dur[-1] += 5
+        #             pred_dur[-1] += 5
 
-                    pred_aln_trg = torch.zeros(input_lengths[bib], int(pred_dur.sum().data))
-                    c_frame = 0
-                    for i in range(pred_aln_trg.size(0)):
-                        pred_aln_trg[i, c_frame:c_frame + int(pred_dur[i].data)] = 1
-                        c_frame += int(pred_dur[i].data)
+        #             pred_aln_trg = torch.zeros(input_lengths[bib], int(pred_dur.sum().data))
+        #             c_frame = 0
+        #             for i in range(pred_aln_trg.size(0)):
+        #                 pred_aln_trg[i, c_frame:c_frame + int(pred_dur[i].data)] = 1
+        #                 c_frame += int(pred_dur[i].data)
 
-                    # encode prosody
-                    en = (d.transpose(-1, -2) @ pred_aln_trg.unsqueeze(0).to(texts.device))
-                    F0_pred, N_pred = model.predictor.F0Ntrain(en, s)
-                    out = model.decoder((t_en[bib, :, :input_lengths[bib]].unsqueeze(0) @ pred_aln_trg.unsqueeze(0).to(texts.device)), 
-                                            F0_pred, N_pred, ref.squeeze().unsqueeze(0))
+        #             # encode prosody
+        #             en = (d.transpose(-1, -2) @ pred_aln_trg.unsqueeze(0).to(texts.device))
+        #             F0_pred, N_pred = model.predictor.F0Ntrain(en, s)
+        #             out = model.decoder((t_en[bib, :, :input_lengths[bib]].unsqueeze(0) @ pred_aln_trg.unsqueeze(0).to(texts.device)), 
+        #                                     F0_pred, N_pred, ref.squeeze().unsqueeze(0))
 
-                    writer.add_audio('pred/y' + str(bib), out.cpu().numpy().squeeze(), epoch, sample_rate=sr)
+        #             writer.add_audio('pred/y' + str(bib), out.cpu().numpy().squeeze(), epoch, sample_rate=sr)
 
-                    if bib >= 5:
-                        break
+        #             if bib >= 5:
+        #                 break
                             
 
         
