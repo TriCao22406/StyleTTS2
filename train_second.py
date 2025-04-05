@@ -241,7 +241,7 @@ def main(config_path):
                             #    )
 
 
-    for epoch in range(start_epoch, epochs):
+    for epoch in range(start_epoch + 1, epochs):
         running_loss = 0
         start_time = time.time()
 
@@ -450,10 +450,11 @@ def main(config_path):
                      loss_params.lambda_norm * loss_norm_rec + \
                      loss_params.lambda_gen * loss_gen_all + \
                      loss_params.lambda_slm * loss_lm + \
-                     loss_params.lambda_sty * loss_sty + \
-                     loss_params.lambda_diff * loss_diff + \
                      loss_params.lambda_ce * loss_ce + \
                      loss_params.lambda_dur * loss_dur
+            
+                    # loss_params.lambda_sty * loss_sty + \
+                    # loss_params.lambda_diff * loss_diff + \
 
             running_loss += loss_mel.item()
             g_loss.backward()
