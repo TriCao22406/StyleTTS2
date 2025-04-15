@@ -144,9 +144,9 @@ def main(config_path):
     _ = [model[key].to(device) for key in model]
     
     # DP
-    # for key in model:
-    #     if key != "mpd" and key != "msd" and key != "wd":
-    #         model[key] = MyDataParallel(model[key])
+    for key in model:
+        if key != "mpd" and key != "msd" and key != "wd":
+            model[key] = MyDataParallel(model[key])
             
     start_epoch = 0
     iters = 0
@@ -179,9 +179,9 @@ def main(config_path):
                    sr, 
                    model_params.slm.sr).to(device)
 
-    # gl = MyDataParallel(gl)
-    # dl = MyDataParallel(dl)
-    # wl = MyDataParallel(wl)
+    gl = MyDataParallel(gl)
+    dl = MyDataParallel(dl)
+    wl = MyDataParallel(wl)
     
     # sampler = DiffusionSampler(
     #     model.diffusion.diffusion,
@@ -268,14 +268,14 @@ def main(config_path):
 
         if epoch < 2000: # Example: Train decoder only after epoch 50
             freeze_module(model, 'decoder', True) # Freeze
-            freeze_module(model, 'bert_encoder', False) # Freeze
+            freeze_module(model, 'bert_encoder', True) # Freeze
             freeze_module(model, 'bert', True) # Freeze
             freeze_module(model, 'predictor', True) # Freeze
             freeze_module(model, 'text_aligner', True) # Freeze
             freeze_module(model, 'pitch_extractor', True) # Freeze
             freeze_module(model, 'wd', True) # Freeze
             freeze_module(model, 'style_encoder', False) # Freeze
-            freeze_module(model, 'text_encoder', False) # Freeze
+            freeze_module(model, 'text_encoder', True) # Freeze
             freeze_module(model, 'predictor_encoder', False) # Freeze
         else:
             freeze_module(model, 'decoder', False) # Unfreeze
@@ -505,18 +505,15 @@ def main(config_path):
                 from IPython.core.debugger import set_trace
                 set_trace()
 
-            optimizer.step('text_encoder')
-            optimizer.step('bert_encoder')
+            # optimizer.step('text_encoder')
+            # optimizer.step('bert_encoder')
             # optimizer.step('bert')
-            # optimizer.step('predictor')
             optimizer.step('predictor_encoder')
             optimizer.step('style_encoder')
-            # optimizer.step('text_aligner')
 
             # if epoch >= diff_epoch:
             #     optimizer.step('diffusion')
             if epoch >= joint_epoch:
-                # optimizer.step('decoder')
 
                 d_loss_slm, loss_gen_lm = 0, 0
         
