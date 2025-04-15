@@ -268,7 +268,7 @@ def main(config_path):
 
         if epoch < 2000: # Example: Train decoder only after epoch 50
             freeze_module(model, 'decoder', True) # Freeze
-            freeze_module(model, 'bert_encoder', True) # Freeze
+            freeze_module(model, 'bert_encoder', False) # Freeze
             freeze_module(model, 'bert', True) # Freeze
             freeze_module(model, 'predictor', True) # Freeze
             freeze_module(model, 'text_aligner', True) # Freeze
@@ -506,7 +506,7 @@ def main(config_path):
                 set_trace()
 
             # optimizer.step('text_encoder')
-            # optimizer.step('bert_encoder')
+            optimizer.step('bert_encoder')
             # optimizer.step('bert')
             optimizer.step('predictor_encoder')
             optimizer.step('style_encoder')
