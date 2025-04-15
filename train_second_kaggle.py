@@ -637,7 +637,7 @@ def main(config_path):
                 'iters': iters,
                 'epoch': epoch,
             }
-            save_path = osp.join(log_dir, 'epoch_2nd_00078.pth')
+            save_path = osp.join(log_dir, 'epoch_2nd_00081.pth')
             torch.save(state, save_path)
             
             # from misaki import vi
